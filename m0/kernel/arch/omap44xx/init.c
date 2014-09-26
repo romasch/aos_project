@@ -155,11 +155,18 @@ static void paging_init(void)
  */
 void arch_init(void *pointer)
 {
-    serial_init(); // TODO: complete implementation of serial_init
+    serial_init();
     // You should be able to call serial_purchar(42); here.
+	serial_putchar(42);
+	
     // Also, you can call printf here!
+	printf ("Hello World\n\n");
+	printf (banner);
+	
     // TODO: Produce some output that will surprise your TA.
-    // TODO: complete implementation of led_flash -- implementation is in
+	printf ("\nThe sum of all the numbers on a roulette wheel is 666\n");
+	
+    // complete implementation of led_flash -- implementation is in
     // kernel/arch/omap44xx/omap_led.c
     led_flash();
 
