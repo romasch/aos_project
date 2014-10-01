@@ -41,4 +41,14 @@ errval_t sys_nop(void);
  */
 errval_t sys_print(const char *string, size_t length);
 
+/**
+ * Switch the LED on or off.
+ */
+errval_t sys_led (void);
+
+/**
+ * Surprize the kernel with an undefined system call.
+ */
+errval_t sys_undefined (void);
+
 #endif //LIBSOS_SYSCALL_H

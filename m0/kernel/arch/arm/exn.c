@@ -19,11 +19,16 @@
 #include <wakeup.h>
 #include <barrelfish_kpi/syscalls.h>
 #include <omap44xx_led.h> // for LED syscall
+#include <serial.h> // for serial_putchar();
 
 __attribute__((noreturn)) void sys_syscall_kernel(void);
 __attribute__((noreturn)) void sys_syscall(arch_registers_state_t*);
 
 #define UNUSED(x) x=x
+
+// Defined here as "real" Barrelfish uses another system anyway and I don't want to modify <syscalls.h>.
+#define ERR_SYSCALL_ARGUMENT_INVALID 2    ///< Error for invalid arguments, e.g. negative sizes.
+#define ERR_SYSCALL_UNKNOWN 3 ///< For unknown syscalls.
 
 void handle_user_page_fault(lvaddr_t                fault_address,
                             arch_registers_state_t* save_area)
@@ -56,6 +61,11 @@ void sys_syscall_kernel(void)
     panic("Why is the kernel making a system call?");
 }
 
+static int check_arg_count (uint32_t actual, uint32_t theoretical)
+{
+	return (actual == theoretical) ? 0 : ERR_SYSCALL_ARGUMENT_MISMATCH;
+}
+
 void sys_syscall(arch_registers_state_t* context)
 {
     // extract syscall number and number of syscall arguments from
@@ -64,11 +74,57 @@ void sys_syscall(arch_registers_state_t* context)
     uintptr_t   syscall = sa->arg0 & 0xf;
     uintptr_t   argc    = (sa->arg0 >> 4) & 0xf;
 
+	char* buffer = 0;
+	uint32_t length = 0;
+	
+	uint32_t error_value = 0;
+	
+	
     UNUSED(syscall);
     UNUSED(argc);
 
     // TODO: implement syscall handling here for milestone 1.
+	
+	switch (syscall) {
+		case  SYSCALL_NOP:
+			error_value = check_arg_count (argc, 1);
+			
+			printf ("Received NOP syscall.\n");
+			error_value = check_arg_count (argc, 1);
+			break;
+		case SYSCALL_PRINT:
+			error_value = check_arg_count (argc, 3);
 
+			buffer = (char*) sa ->  arg1;
+			length = sa -> arg2;
+			printf ("Received PRINT syscall, length %u\n", length);
+			error_value = check_arg_count (argc, 3);
+			
+			// It may be possible to read kernel memory...
+			if ((buffer + length) >= (char*) 0x80000000 || buffer + length <= buffer || buffer == NULL) {
+				error_value = ERR_SYSCALL_ARGUMENT_INVALID;
+			}
+			
+			if (error_value == 0) {
+				for (int i=0; i<length; ++i) {
+					serial_putchar (buffer[i]);
+				}
+			}
+			
+			break;
+		case SYSCALL_LED:
+			printf ("Received LED syscall\n");
+			panic ("LED syscall not implemented!\n");
+			error_value = ERR_SYSCALL_UNKNOWN;
+			break;
+		default:
+			printf ("Unknown syscall. Ignore and return.\n");
+			error_value = ERR_SYSCALL_UNKNOWN;
+	}
+
+	// Apparently Register R0 should contain the return value.
+	sa -> arg0 = error_value;
+	
     // resume user process
     resume(context);
 }

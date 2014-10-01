@@ -88,7 +88,6 @@ resume(arch_registers_state_t *state)
     ctr++;
     state->named.rtls = arch_get_thread_register();
     ensure_user_mode_policy(state);
-
     /*
       This function succeeds the first time executed, i.e.
       when init is started for the first time.

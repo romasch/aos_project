@@ -38,5 +38,15 @@ errval_t sys_nop(void)
 
 errval_t sys_print(const char *string, size_t length)
 {
-    return SYS_ERR_OK;
+    return syscall3(SYSCALL_PRINT, (uint32_t) string, length).error;
+}
+
+errval_t sys_led(void)
+{
+	return syscall1(SYSCALL_LED).error;
+}
+
+errval_t sys_undefined (void)
+{
+	return syscall1(1000).error;
 }

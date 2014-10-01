@@ -58,8 +58,11 @@ dummy_terminal_read(char *data, size_t count)
 static size_t
 dummy_terminal_write(const char *data, size_t count)
 {
+	sys_print (data, count);
     return count;
 }
+
+static char printf_buffer [1024];
 
 /* Set libc function pointers */
 void sos_libc_glue_init(void)
@@ -88,6 +91,9 @@ void sos_init(dispatcher_handle_t handle, bool init_dom_arg)
     sos_libc_glue_init();
     // initialize skeleton heap allocator to make C library compile
     morecore_init();
+	
+	setvbuf (stdout, printf_buffer, _IOLBF, sizeof (printf_buffer));
+	
     main(1, args);
     while(1);
 }

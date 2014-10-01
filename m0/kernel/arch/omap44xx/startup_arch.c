@@ -104,10 +104,13 @@ struct dcb *spawn_init(const char *name)
     // TODO: setup page tables for Init, set the provided variables
     // init_l1 and init_l2 to the address of the L1 and L2 page table respectively.
     // NOTE: internal functionality expects l2 ptables back-to-back in memory
-    UNUSED(init_l1);
-    UNUSED(init_l2);
+	
+	build_init_page_tables();
+//     UNUSED(init_l1);
+//     UNUSED(init_l2);
 
     // TODO: save address of user L1 page table in init_dcb->vspace
+	init_dcb -> vspace = (uint32_t) init_l1;
 
     // Map & Load init structures and ELF image
     // returns the entry point address and the global offset table base address
@@ -128,6 +131,9 @@ struct dcb *spawn_init(const char *name)
     disp_arm->save_area.named.cpsr = ARM_MODE_USR | CPSR_F_MASK;
 
     // TODO: set pc and r10(got base) in register save area (disp_arm->save_area)
+	
+	disp_arm -> save_area.named.pc = init_ep;
+	disp_arm -> save_area.named.r10 = got_base;
 
     return init_dcb;
 }
