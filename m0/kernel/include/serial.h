@@ -27,6 +27,10 @@ extern const unsigned serial_num_physical_ports;
 extern void serial_init(void);
 extern void serial_map_registers(void);
 
+extern void romasch_serial_suspend (void);
+extern void romasch_serial_resume (void);
+extern void romasch_serial_set_registers (int);
+
 /*
  * Polled, blocking input/output.  No buffering.
  */

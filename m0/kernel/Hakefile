@@ -95,7 +95,8 @@ let
                 "arch/omap44xx/omap_led.c",
                 "arch/omap44xx/omap_uart.c",
                 "arch/omap44xx/startup_arch.c",
-                "arch/omap44xx/startup_helpers.c" ],
+                "arch/omap44xx/startup_helpers.c",
+                "arch/omap44xx/romasch_paging.c"],
       addLibraries = [ "elf" ]
      }
   ]

@@ -55,14 +55,13 @@ static void wait (void)
 /*
  * Flash the LED On the pandaboard
  */
-__attribute__((noreturn))
 void led_flash(void)
 {	
 	// Enable output by setting the LED bit to zero (see TRM page 5677).
 	*led_oe = *led_oe & ~LED_BIT;
 
 	// TODO: you'll want to change the infinite loop here for milestone 1.
-    while (true) {
+    for (int i=0; i<1; ++i) {
 		*led_dataout = *led_dataout | LED_BIT;
 		wait ();
 		*led_dataout = *led_dataout & ~LED_BIT;

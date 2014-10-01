@@ -31,6 +31,9 @@ static volatile uint32_t *uart_fcr = (uint32_t *)(UART_BASE + 0x0008);
 static volatile uint32_t *uart_lcr = (uint32_t *)(UART_BASE + 0x000C);
 static volatile uint32_t *uart_lsr = (uint32_t *)(UART_BASE + 0x0014);
 
+
+
+
 static void set_register_addresses(lvaddr_t base)
 {
     uart_thr = (uint32_t *)(base + 0x0000);
@@ -40,7 +43,25 @@ static void set_register_addresses(lvaddr_t base)
     uart_lsr = (uint32_t *)(base + 0x0014);
 }
 
+static bool is_stopped = false;
 static bool uart_initialized = false;
+
+void romasch_serial_set_registers (int base)
+{
+	set_register_addresses (base);
+	uart_initialized = true;
+}
+
+void romasch_serial_suspend (void)
+{
+	is_stopped = true;
+}
+
+void romasch_serial_resume (void)
+{
+	is_stopped = false;
+}
+
 /**
  * \brief Reinitialize console UART after setting up the MMU
  * This function is needed in milestone 1.
@@ -85,14 +106,17 @@ void serial_init(void)
  */
 void serial_putchar(char c)
 {
-    // we need to send \r\n over the serial line for a newline
-    if (c == '\n') serial_putchar('\r');
-
-    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)	
-	while ( ((*uart_lsr) & TX_FIFO_E) == 0 ) {
-		// Do nothing
-	}
+	if (! is_stopped) {
 	
-    // Write character
-    *uart_thr = c;
+		// we need to send \r\n over the serial line for a newline
+		if (c == '\n') serial_putchar('\r');
+
+		// Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)	
+		while ( ((*uart_lsr) & TX_FIFO_E) == 0 ) {
+			// Do nothing
+		}
+		
+		// Write character
+		*uart_thr = c;
+	}
 }

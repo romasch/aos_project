@@ -32,6 +32,8 @@
 #include <omap44xx_map.h>
 #include <omap44xx_led.h>
 
+#include <romasch_paging.h>
+
 /**
  * \brief Kernel stack.
  *
@@ -81,7 +83,8 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
     led_map_register();
 
     // flash leds again
-    led_flash();
+	//TODO uncomment.
+//     led_flash();
 
     printf("The address of paging_map_kernel_section is %p\n",
            paging_map_kernel_section);
@@ -142,11 +145,24 @@ extern void paging_map_device_section(uintptr_t ttbase, lvaddr_t va, lpaddr_t pa
 /**
  * Create initial (temporary) page tables.
  *
- * TODO: you need to implement this function for milestone 1.
  */
+__attribute__((used)) // Suppress compiler warning about unused function.
 static void paging_init(void)
 {
-}
+	// Get the kernel start address.
+	uint32_t kernel_begin = (uint32_t) &kernel_first_byte;
+	
+	// Use the predefined function paging_arm_reset() to
+	// generate a one-to-one mapping between kernel physical
+	// and virtual addresses.
+	paging_arm_reset (kernel_begin, 1024*1024);
+	
+	// We also need the section where glbl_core_data is located (in 0x80010000)
+	paging_map_memory (cp15_read_ttbr1(), (lpaddr_t) glbl_core_data, 1024*1024);
+	
+	// Initialize the TTBCR with 1.
+	cp15_write_ttbcr (1);
+}	
 
 /**
  * Entry point called from boot.S for bootstrap processor.
@@ -163,21 +179,45 @@ void arch_init(void *pointer)
 	printf ("Hello World\n\n");
 	printf (banner);
 	
-    // TODO: Produce some output that will surprise your TA.
+    // Produce some output that will surprise your TA.
 	printf ("\nThe sum of all the numbers on a roulette wheel is 666\n");
 	
     // complete implementation of led_flash -- implementation is in
     // kernel/arch/omap44xx/omap_led.c
     led_flash();
 
-    for(;;); // Infinite loop to keep the system busy for milestone 0.
-
     // You will need this section of the code for milestone 1.
     struct multiboot_info *mb = (struct multiboot_info *)pointer;
     parse_multiboot_image_header(mb);
-
-    paging_init();
+	
+	OUT (&kernel_first_byte);
+	OUT (&kernel_final_byte);
+	OUT (kernel_stack);
+	
+	paging_init();
+//	romasch_paging_init();
+	
+ 	// Tests
+	TEST (&kernel_first_byte);
+	TEST (&kernel_final_byte);
+	TEST (uart_base());
+	TEST (cp15_read_ttbr1());
+	
+	OUT (cp15_read_ttbr1());
+	OUT (cp15_read_ttbcr());
+	OUT (uart_base());
+	OUT (glbl_core_data);
+	
+	romasch_serial_suspend();
+	
     cp15_enable_mmu();
+	cp15_invalidate_tlb_fn();
+	cp15_invalidate_i_and_d_caches();
+
+  	serial_map_registers ();	
+//	romasch_serial_set_registers (uart_base());
+	
+	romasch_serial_resume();
     printf("MMU enabled\n");
 
     text_init();
