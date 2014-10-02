@@ -32,8 +32,6 @@ static volatile uint32_t *uart_lcr = (uint32_t *)(UART_BASE + 0x000C);
 static volatile uint32_t *uart_lsr = (uint32_t *)(UART_BASE + 0x0014);
 
 
-
-
 static void set_register_addresses(lvaddr_t base)
 {
     uart_thr = (uint32_t *)(base + 0x0000);
@@ -46,20 +44,30 @@ static void set_register_addresses(lvaddr_t base)
 static bool is_stopped = false;
 static bool uart_initialized = false;
 
+
+/**
+ * Set registers addresses after enabling MMU.
+ */
 void romasch_serial_set_registers (int base)
 {
-	set_register_addresses (base);
-	uart_initialized = true;
+    set_register_addresses (base);
+    uart_initialized = true;
 }
 
+/**
+ * Suspend output, i.e. ignore calls
+ * to serial_putchar();
+ */
 void romasch_serial_suspend (void)
 {
-	is_stopped = true;
+    is_stopped = true;
 }
-
+/**
+ * Resume output.
+ */
 void romasch_serial_resume (void)
 {
-	is_stopped = false;
+    is_stopped = false;
 }
 
 /**
@@ -76,8 +84,7 @@ void serial_map_registers(void)
     // paging_map_device returns an address pointing to the beginning of
     // a section, need to add the offset for within the section again
     uint32_t offset = (UART_BASE & ARM_L1_SECTION_MASK);
-    printf("omap serial_map_registers: base = 0x%"PRIxLVADDR" 0x%"PRIxLVADDR"\n",
-	   base, base + offset);
+    printf("omap serial_map_registers: base = 0x%"PRIxLVADDR" 0x%"PRIxLVADDR"\n", base, base + offset);
     set_register_addresses(base + offset);
     uart_initialized = true;
     printf("omap serial_map_registers: done.\n");
@@ -90,6 +97,7 @@ void serial_map_registers(void)
 void serial_init(void)
 {
     set_register_addresses(UART_BASE);
+
     // Disable all interrupts
     *uart_ier = 0;
 
@@ -106,17 +114,17 @@ void serial_init(void)
  */
 void serial_putchar(char c)
 {
-	if (! is_stopped) {
-	
-		// we need to send \r\n over the serial line for a newline
-		if (c == '\n') serial_putchar('\r');
+    if (! is_stopped) {
 
-		// Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)	
-		while ( ((*uart_lsr) & TX_FIFO_E) == 0 ) {
-			// Do nothing
-		}
-		
-		// Write character
-		*uart_thr = c;
-	}
+        // we need to send \r\n over the serial line for a newline
+        if (c == '\n') serial_putchar('\r');
+
+        // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)	
+        while ( ((*uart_lsr) & TX_FIFO_E) == 0 ) {
+            // Do nothing
+        }
+
+        // Write character
+        *uart_thr = c;
+    }
 }

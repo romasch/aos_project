@@ -43,10 +43,10 @@ errval_t sys_print(const char *string, size_t length)
 
 errval_t sys_led(bool new_state)
 {
-	return syscall2(SYSCALL_LED, new_state).error;
+    return syscall2(SYSCALL_LED, new_state).error;
 }
 
 errval_t sys_undefined (void)
 {
-	return syscall1(1000).error;
+    return syscall1(1000).error;
 }

@@ -148,20 +148,20 @@ extern void paging_map_device_section(uintptr_t ttbase, lvaddr_t va, lpaddr_t pa
 __attribute__((used)) // Suppress compiler warning about unused function.
 static void paging_init(void)
 {
-	// Get the kernel start address.
-	uint32_t kernel_begin = (uint32_t) &kernel_first_byte;
-	
-	// Use the predefined function paging_arm_reset() to
-	// generate a one-to-one mapping between kernel physical
-	// and virtual addresses.
-	paging_arm_reset (kernel_begin, 1024*1024);
-	
-	// We also need the section where glbl_core_data is located (in 0x80010000)
-	paging_map_memory (cp15_read_ttbr1(), (lpaddr_t) glbl_core_data, 1024*1024);
-	
-	// Initialize the TTBCR with 1.
-	cp15_write_ttbcr (1);
-}	
+    // Get the kernel start address.
+    uint32_t kernel_begin = (uint32_t) &kernel_first_byte;
+
+    // Use the predefined function paging_arm_reset() to
+    // generate a one-to-one mapping between kernel physical
+    // and virtual addresses.
+    paging_arm_reset (kernel_begin, 1024*1024);
+
+    // We also need the section where glbl_core_data is located (in 0x80010000)
+    paging_map_memory (cp15_read_ttbr1(), (lpaddr_t) glbl_core_data, 1024*1024);
+
+    // Initialize the TTBCR with 1.
+    cp15_write_ttbcr (1);
+}
 
 /**
  * Entry point called from boot.S for bootstrap processor.
@@ -172,15 +172,15 @@ void arch_init(void *pointer)
 {
     serial_init();
     // You should be able to call serial_purchar(42); here.
-	serial_putchar(42);
-	
+    serial_putchar(42);
+
     // Also, you can call printf here!
-	printf ("Hello World\n\n");
-	printf (banner);
-	
+    printf ("Hello World\n\n");
+    printf (banner);
+
     // Produce some output that will surprise your TA.
-	printf ("\nThe sum of all the numbers on a roulette wheel is 666\n");
-	
+    printf ("\nThe sum of all the numbers on a roulette wheel is 666\n");
+
     // complete implementation of led_flash -- implementation is in
     // kernel/arch/omap44xx/omap_led.c
     led_flash();
@@ -188,35 +188,35 @@ void arch_init(void *pointer)
     // You will need this section of the code for milestone 1.
     struct multiboot_info *mb = (struct multiboot_info *)pointer;
     parse_multiboot_image_header(mb);
-	
-	OUT (&kernel_first_byte);
-	OUT (&kernel_final_byte);
-	OUT (kernel_stack);
-	
-	paging_init();
-//	romasch_paging_init();
-	
- 	// Tests
-	TEST (&kernel_first_byte);
-	TEST (&kernel_final_byte);
-	TEST (uart_base());
-	TEST (cp15_read_ttbr1());
-	
-	OUT (cp15_read_ttbr1());
-	OUT (cp15_read_ttbcr());
-	OUT (uart_base());
-	OUT (glbl_core_data);
-	
-	romasch_serial_suspend();
-	
-    cp15_enable_mmu();
-	cp15_invalidate_tlb_fn();
-	cp15_invalidate_i_and_d_caches();
 
-  	serial_map_registers ();	
-//	romasch_serial_set_registers (uart_base());
-	
-	romasch_serial_resume();
+    paging_init();
+    // romasch_paging_init();
+
+    // Tests
+    OUT (&kernel_first_byte);
+    OUT (&kernel_final_byte);
+    OUT (kernel_stack);
+
+    TEST (&kernel_first_byte);
+    TEST (&kernel_final_byte);
+    TEST (uart_base());
+    TEST (cp15_read_ttbr1());
+
+    OUT (cp15_read_ttbr1());
+    OUT (cp15_read_ttbcr());
+    OUT (uart_base());
+    OUT (glbl_core_data);
+
+    romasch_serial_suspend();
+
+    cp15_enable_mmu();
+    cp15_invalidate_tlb_fn();
+    cp15_invalidate_i_and_d_caches();
+
+    serial_map_registers ();	
+    // romasch_serial_set_registers (uart_base());
+
+    romasch_serial_resume();
     printf("MMU enabled\n");
 
     text_init();

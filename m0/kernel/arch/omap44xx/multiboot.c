@@ -36,7 +36,7 @@ struct arm_core_data *glbl_core_data = (struct arm_core_data *)GLBL_COREDATA_BAS
  */
 struct multiboot_modinfo *multiboot_find_module(const char *pathname)
 {
-	struct multiboot_modinfo *mod = (struct multiboot_modinfo *)
+    struct multiboot_modinfo *mod = (struct multiboot_modinfo *)
         local_phys_to_mem(glbl_core_data->mods_addr);
 
     for(size_t i = 0; i < glbl_core_data->mods_count; i++) {
