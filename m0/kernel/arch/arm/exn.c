@@ -78,26 +78,20 @@ void sys_syscall(arch_registers_state_t* context)
 	uint32_t length = 0;
 	
 	uint32_t error_value = 0;
-	
-	
-    UNUSED(syscall);
-    UNUSED(argc);
 
-    // TODO: implement syscall handling here for milestone 1.
+    // Implement syscall handling here for milestone 1.
 	
 	switch (syscall) {
 		case  SYSCALL_NOP:
-			error_value = check_arg_count (argc, 1);
-			
 			printf ("Received NOP syscall.\n");
 			error_value = check_arg_count (argc, 1);
 			break;
 		case SYSCALL_PRINT:
+			printf ("Received PRINT syscall, length %u\n", length);
 			error_value = check_arg_count (argc, 3);
 
 			buffer = (char*) sa ->  arg1;
 			length = sa -> arg2;
-			printf ("Received PRINT syscall, length %u\n", length);
 			error_value = check_arg_count (argc, 3);
 			
 			// It may be possible to read kernel memory...
@@ -114,8 +108,14 @@ void sys_syscall(arch_registers_state_t* context)
 			break;
 		case SYSCALL_LED:
 			printf ("Received LED syscall\n");
-			panic ("LED syscall not implemented!\n");
-			error_value = ERR_SYSCALL_UNKNOWN;
+			error_value = check_arg_count (argc, 2);
+			
+			bool new_state = (bool) sa -> arg1;
+			
+			if (error_value == 0) {
+				led_set_state (new_state);
+			}
+			
 			break;
 		default:
 			printf ("Unknown syscall. Ignore and return.\n");

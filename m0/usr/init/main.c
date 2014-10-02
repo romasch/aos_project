@@ -27,6 +27,6 @@ int main(void)
 	printf ("Testing sys_print with illegal args: %u\n", sys_print (NULL, 1));
 	printf ("Testing sys_undefined: %u\n", sys_undefined ());
 	printf ("Testing sys_led: %u\n", sys_undefined ());
-	printf ("%u\n", sys_led ());
+	printf ("%u\n", sys_led (true));
     return 0;
 }

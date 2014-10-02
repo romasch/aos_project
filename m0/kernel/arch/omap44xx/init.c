@@ -83,8 +83,7 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
     led_map_register();
 
     // flash leds again
-	//TODO uncomment.
-//     led_flash();
+    led_flash();
 
     printf("The address of paging_map_kernel_section is %p\n",
            paging_map_kernel_section);

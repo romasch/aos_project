@@ -29,6 +29,13 @@ void led_map_register(void)
 {
     // TODO: remap GPIO registers in newly setup address space and ensure
     // that led_flash and co use the new address locations.
+	
+	lvaddr_t base = paging_map_device(GPIO_1_BASE, GPIO_DATAOUT_OFFSET + 4);
+	uint32_t offset = (GPIO_1_BASE & ARM_L1_SECTION_MASK);
+	
+	// Due to pointer arithmetics 
+	led_oe = (uint32_t*) (base + offset + GPIO_OUTPUT_ENABLE_OFFSET);
+	led_dataout = (uint32_t*) (base + offset + GPIO_DATAOUT_OFFSET);
 }
 
 /*
@@ -36,8 +43,16 @@ void led_map_register(void)
  * TODO: This function might be useful for the extra challenge in
  * milestone 1.
  */
-void led_set_state(bool new_state)
+void led_set_state (bool new_state)
 {
+	if (new_state) {
+		// Enable LED.
+		*led_dataout = *led_dataout | LED_BIT;
+	} else {
+		// Disable LED.
+		*led_dataout = *led_dataout & ~LED_BIT;
+	}
+	
 }
 
 /*
@@ -45,7 +60,7 @@ void led_set_state(bool new_state)
  */
 static void wait (void)
 {
-	for (uint32_t k = 0; k < (1 << 28); k++) {
+	for (uint32_t k = 0; k < (1 << 27); k++) {
 		// Inject an assembly 'nop', otherwise the compiler
 		// will optimize away the loop.
 		__asm__("nop");

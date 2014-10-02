@@ -41,9 +41,9 @@ errval_t sys_print(const char *string, size_t length)
     return syscall3(SYSCALL_PRINT, (uint32_t) string, length).error;
 }
 
-errval_t sys_led(void)
+errval_t sys_led(bool new_state)
 {
-	return syscall1(SYSCALL_LED).error;
+	return syscall2(SYSCALL_LED, new_state).error;
 }
 
 errval_t sys_undefined (void)
