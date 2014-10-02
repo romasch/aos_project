@@ -24,7 +24,6 @@
 __attribute__((noreturn)) void sys_syscall_kernel(void);
 __attribute__((noreturn)) void sys_syscall(arch_registers_state_t*);
 
-#define UNUSED(x) x=x
 
 // Defined here as "real" Barrelfish uses another system anyway and I don't want to modify <syscalls.h>.
 #define ERR_SYSCALL_ARGUMENT_INVALID 2    ///< Error for invalid arguments, e.g. negative sizes.
@@ -76,18 +75,17 @@ void sys_syscall(arch_registers_state_t* context)
 
     char* buffer = 0;
     uint32_t length = 0;
-
     uint32_t error_value = 0;
 
     // Implement syscall handling here for milestone 1.
 
     switch (syscall) {
         case  SYSCALL_NOP:
-            printf ("Received NOP syscall.\n");
+            printf ("\t>> Received NOP syscall.\n");
             error_value = check_arg_count (argc, 1);
             break;
         case SYSCALL_PRINT:
-            printf ("Received PRINT syscall, length %u\n", length);
+            printf ("\t>> Received PRINT syscall.\n");
             error_value = check_arg_count (argc, 3);
 
             buffer = (char*) sa ->  arg1;
@@ -107,7 +105,7 @@ void sys_syscall(arch_registers_state_t* context)
 
             break;
         case SYSCALL_LED:
-            printf ("Received LED syscall\n");
+            printf ("\t>> Received LED syscall.\n");
             error_value = check_arg_count (argc, 2);
 
             bool new_state = (bool) sa -> arg1;
@@ -118,7 +116,7 @@ void sys_syscall(arch_registers_state_t* context)
 
             break;
         default:
-            printf ("Unknown syscall. Ignore and return.\n");
+            printf ("\t>> Unknown syscall (ignore and return).\n");
             error_value = ERR_SYSCALL_UNKNOWN;
     }
 

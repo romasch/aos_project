@@ -4,8 +4,8 @@
 
 #include <kernel.h>
 
-#define OUT(var) printf("Value of "#var": %X\n", var) 
-#define TEST(expr) printf("Test mapping of "#expr": %X -> %X\n", (lvaddr_t) expr, test_translate ((lvaddr_t) expr))
+#define OUT(var) printf("\t>> Value of "#var": %X\n", var)
+#define TEST(expr) printf("\t>> Test mapping of "#expr": %X -> %X\n", (lvaddr_t) expr, test_translate ((lvaddr_t) expr))
 
 /*
  * Paging init.
