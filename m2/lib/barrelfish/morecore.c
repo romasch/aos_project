@@ -26,7 +26,7 @@ extern morecore_free_func_t sys_morecore_free;
 
 // this define makes morecore use an implementation that just has a static
 // 16MB heap.
-#define USE_STATIC_HEAP
+//#define USE_STATIC_HEAP
 
 
 #ifdef USE_STATIC_HEAP
@@ -94,10 +94,19 @@ errval_t morecore_init(void)
  * be smaller than bytes if we were able to allocate a smaller memory
  * region than requested for.
  */
-static void *morecore_alloc(size_t bytes, size_t *retbytes)
+static void *morecore_alloc (size_t bytes, size_t *retbytes)
 {
-    USER_PANIC("NYI");
-    return NULL;
+    void* result = NULL;
+
+    //TODO: error handing.
+    errval_t err = paging_alloc (get_current_paging_state(), &result, bytes);
+
+    if (err_is_fail (err)) {
+        *retbytes = 0;
+    } else {
+        *retbytes = bytes;
+    }
+    return result;
 }
 
 static void morecore_free(void *base, size_t bytes)
@@ -107,7 +116,8 @@ static void morecore_free(void *base, size_t bytes)
 
 errval_t morecore_init(void)
 {
-    USER_PANIC("NYI");
+    sys_morecore_alloc = morecore_alloc;
+    sys_morecore_free = morecore_free;
     return SYS_ERR_OK;
 }
 

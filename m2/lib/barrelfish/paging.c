@@ -47,11 +47,97 @@ static errval_t arml2_alloc(struct capref *ret)
 // TODO: implement page fault handler that installs frames when a page fault
 // occurs and keeps track of the virtual address space.
 
-errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr,
-        struct capref pdir)
+#define S_SIZE 2*8192
+#define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
+static char e_stack[S_SIZE];
+static char* e_stack_top = e_stack + S_SIZE;
+static void my_exception_handler (enum exception_type type, int subtype,
+                                     void *addr, arch_registers_state_t *regs,
+                                     arch_registers_fpu_state_t *fpuregs) 
+{
+    debug_printf ("Hello Exception World!\nGot type %u, subtype %u, addr %X\n", type, subtype, addr);
+    lvaddr_t vaddr = (lvaddr_t) addr;
+
+    if (type == EXCEPT_PAGEFAULT 
+        && subtype == PAGEFLT_NULL
+        && current.heap_begin <= vaddr 
+        && vaddr < current.heap_end )
+    {
+        lvaddr_t mapped = current.heap_mapped;
+        
+        while (mapped <= vaddr) {
+            
+            int l1_index = ARM_L1_USER_OFFSET(mapped);
+            int l2_index = ARM_L2_USER_OFFSET(mapped);
+            struct capref l1_table = (struct capref) {
+            .cnode = cnode_page,
+            .slot = 0,
+            };
+            // would need checks if ptables exist already
+            struct capref l2_table;
+            if (current.last_l1_index != l1_index) {
+                arml2_alloc(&l2_table);
+                vnode_map(l1_table, l2_table, l1_index, FLAGS, 0, 1);
+                
+                current.last_l1_index = l1_index;
+                current.last_l2_table = l2_table;
+            } else {
+                l2_table = current.last_l2_table;
+            }
+            
+            // TODO: Split frames to perform mappings of less than 1 MB.
+
+            size_t frame_size = 1024 * 1024u; // 1 MiB
+
+            struct capref frame;
+            frame_alloc(&frame, frame_size, &frame_size);
+
+            errval_t err = vnode_map(l2_table, frame, l2_index, FLAGS, 0, 256);
+
+            if (err_is_fail(err)) {
+                debug_printf ("Mapping failed: %s\n", err_getstring (err));
+                abort();
+            }
+            /*
+            if (current.last_frame_slot < 0 || current.last_frame_slot >= 256) {
+                // No more space in current frame.
+                frame_alloc(&frame, frame_size, &frame_size);
+                debug_printf ("Allocated 0x%X bytes\n", frame_size); 
+                current.current_frame = frame;
+                current.last_frame_slot = -1;
+            }
+            frame = current.current_frame;
+            uint32_t slot = current.last_frame_slot + 1;
+            current.last_frame_slot = slot;
+
+            size_t page_size = 4096u;
+            errval_t err = vnode_map(l2_table, frame, l2_index, FLAGS, slot*page_size, 256);
+            if (err_is_fail(err)) {
+                debug_printf ("Mapping failed: %s\n", err_getstring (err));
+                abort();
+            }//*/
+
+            mapped += frame_size;
+        }
+
+        current.heap_mapped = mapped;
+    } else {
+        debug_printf ("Invalid address!\n");
+        abort();
+    }
+}
+
+
+errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
     debug_printf("paging_init_state\n");
     // TODO: implement state struct initialization
+    st -> heap_begin = start_vaddr;
+    st -> heap_end = start_vaddr;
+    st ->  heap_mapped = start_vaddr;
+    st -> last_l1_index = -1;
+    st -> last_frame_slot = -1;
+    
     return SYS_ERR_OK;
 }
 
@@ -61,10 +147,19 @@ errval_t paging_init(void)
     debug_printf("paging_init\n");
     // TODO: initialize self-paging handler
     // TIP: use thread_set_exception_handler() to setup a page fault handler
+    void* oldbase = 0;
+    void* oldtop = 0;
+    thread_set_exception_handler (&my_exception_handler, NULL, e_stack, e_stack_top, &oldbase, &oldtop);
+    debug_printf ("Got old stack base: %X, old stack top: %X\n", oldbase, oldtop);
     // TIP: Think about the fact that later on, you'll have to make sure that
     // you can handle page faults in any thread of a domain.
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
+    
+    //TODO WTF is: struct capref pdir
+    struct capref pdir;
+    //TODO check if VADDR_OFFSET is ok as the start of our heap.
+    paging_init_state (&current, VADDR_OFFSET, pdir);
     set_current_paging_state(&current);
     return SYS_ERR_OK;
 }
@@ -72,6 +167,7 @@ errval_t paging_init(void)
 void paging_init_onthread(struct thread *t)
 {
     // TODO: setup exception handler for thread `t'.
+    debug_printf ("called\n");
 }
 
 /**
@@ -142,7 +238,10 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
-    *buf = NULL;
+//     *buf = NULL;
+    printf ("Paging alloc with bytes %u\n", bytes);
+    *buf = (void*)  st -> heap_end;
+    st -> heap_end += bytes;
     return SYS_ERR_OK;
 }
 

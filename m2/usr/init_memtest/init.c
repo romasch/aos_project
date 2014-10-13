@@ -45,6 +45,7 @@ int main(int argc, char *argv[])
     }
 
     char *static_malloc_buf = malloc(MALLOC_BUFSIZE);
+    printf ("static malloc buf allocated\n");
     for (int i = 0; i < MALLOC_BUFSIZE; i++){
         static_malloc_buf[i] = i%255;
     }
@@ -85,6 +86,7 @@ int main(int argc, char *argv[])
         printf("did not get a buffer\n");
         abort();
     }
+    printf ("Got a buffer. Address: 0x%X\n", vbuf);
 
     char *buf = vbuf;
 

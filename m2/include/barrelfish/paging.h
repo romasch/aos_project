@@ -49,8 +49,33 @@ typedef int paging_flags_t;
 // struct to store the paging status of a process
 struct paging_state {
     // TODO: add struct members to keep track of the page tables etc
+    lvaddr_t heap_begin;
+    lvaddr_t heap_end;
+    
+    lvaddr_t heap_mapped;
+    uint32_t last_l1_index;
+    struct capref last_l2_table;
+    
+    // Store the current frame to be filled.
+    // Frames are always 1 MiB big and have [0..255] 4KiB slots.
+    uint32_t last_frame_slot;
+    struct capref current_frame;
+
+//     struct frame_list* static_frames;
+//     struct frame_list* revocable_frames;
 };
 
+// struct frame_list {
+//     struct capref frame;
+//     lvaddr_t pages [256];
+//     struct frame_list* next;
+// };
+// 
+// struct frame_mapping {
+//     struct capref frame;
+//     lvaddr_t page_address;
+//     uint32_t offset;
+// };
 
 struct thread;
 /// Initialize paging_state struct
