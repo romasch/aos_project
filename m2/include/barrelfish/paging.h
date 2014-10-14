@@ -24,10 +24,17 @@ typedef int paging_flags_t;
 #define VADDR_OFFSET ((lvaddr_t)1UL*1024*1024*1024) // 1GB
 
 #define SLAB_BUFSIZE 16
+
+// why on earth doesn't this match the actual ARM mmu engine?!
 #define ARM_L1_USER_OFFSET(addr) ((addr)>>22 & 0x3ff)
 #define ARM_L1_USER_ENTRIES 1024u
 #define ARM_L2_USER_OFFSET(addr) ((addr)>>12 & 0x3ff)
 #define ARM_L2_USER_ENTRIES 1024u
+
+// #define ARM_L1_USER_OFFSET(addr) ((addr)>>20)
+// #define ARM_L1_USER_ENTRIES 4096u
+// #define ARM_L2_USER_OFFSET(addr) ((addr) << 12 >> 24)
+// #define ARM_L2_USER_ENTRIES 256u
 
 #define VREGION_FLAGS_READ     0x01 // Reading allowed
 #define VREGION_FLAGS_WRITE    0x02 // Writing allowed
@@ -47,9 +54,17 @@ typedef int paging_flags_t;
     (VREGION_FLAGS_READ | VREGION_FLAGS_WRITE | VREGION_FLAGS_MPB)
 
     
-#define FRAME_SIZE (1024*1024)
+#define FRAME_SIZE (1024u*1024u)
 #define PAGE_SIZE (4*1024)
 struct frame_list;
+
+// We only need to store if the page has been mapped at some point.
+// (Not mapped + Pagefault) -> allocate new, empty frame.
+// (Mapped + Pagefault) -> Paged out. Allocate frame & retrieve from disk.
+struct ptable_lvl2 {
+    struct capref lvl2_cap;
+    bool page_exists [ARM_L2_USER_ENTRIES];
+};
 
 // struct to store the paging status of a process
 struct paging_state {
@@ -67,12 +82,14 @@ struct paging_state {
     // Page table management:
 
     // Keep track of allocated second-level page tables.
-    // A first-level page table always has 4096 entries.
+    // A first-level page table always has 4096 entries. TODO adapt comment
         // TODO: Maybe we can implement a dynamic structure 
         // which doesn't waste a lot of memory.
-    struct ptable_lvl2* ptables [4096];
+    struct ptable_lvl2* ptables [ARM_L1_USER_ENTRIES];
     // ptable_mem is a simple memory manager for second-level page tables
     struct slab_alloc ptable_mem;
+    // Temporary space for a lvl2 page table to avoid some endless recursion.
+    struct ptable_lvl2 temp_ptable;
 
     // Frame management:
 
@@ -80,8 +97,8 @@ struct paging_state {
     // That way pages can be unmapped in a FIFO way
     // if physical memory gets scarce.
     // NOTE: Remove from head, insert at end.
-    struct frame_list* head;
-    struct frame_list* end;
+    struct frame_list* flist_head;
+    struct frame_list* flist_tail;
     // Simple memory manager for frame list.
     struct slab_alloc frame_mem;
 
@@ -95,20 +112,18 @@ struct paging_state {
     struct capref current_frame;
 };
 
-// We only need to store if the page has been mapped at some point.
-// (Not mapped + Pagefault) -> allocate new, empty frame.
-// (Mapped + Pagefault) -> Paged out. Allocate frame & retrieve from disk.
-struct ptable_lvl2 {
-    struct capref lvl2_table;
-    bool page_exists [256];
-};
+
+void init_ptable_lvl2 (struct ptable_lvl2* ptable);
 
 // For each frame, store frame cap & pages residing on this frame.
+// Need to call cap_revoke() when unmapping the frame, as copies are not stored.
 struct frame_list {
     struct capref frame;
+    uint32_t next_free_slot;
     lvaddr_t pages [FRAME_SIZE / PAGE_SIZE]; // address is enough to identify a page.
     struct frame_list* next;
 };
+void init_frame_list (struct frame_list* node);
 
 // struct frame_mapping {
 //     struct capref frame;
