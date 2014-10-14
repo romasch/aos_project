@@ -131,6 +131,7 @@ static void my_exception_handler (enum exception_type type, int subtype,
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
     debug_printf("paging_init_state\n");
+    debug_printf ("Size of struct capref: %u", sizeof(struct capref));
     // TODO: implement state struct initialization
     st -> heap_begin = start_vaddr;
     st -> heap_end = start_vaddr;
@@ -238,8 +239,13 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
-//     *buf = NULL;
-    printf ("Paging alloc with bytes %u\n", bytes);
+    
+    printf ("Paging alloc with bytes %X\n", bytes);
+    if (bytes << 20 != 0) {
+        debug_printf ("Error in paging_alloc: bytes not page aligned.\n");
+        abort();
+    }
+    
     *buf = (void*)  st -> heap_end;
     st -> heap_end += bytes;
     return SYS_ERR_OK;

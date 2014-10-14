@@ -97,6 +97,10 @@ errval_t morecore_init(void)
 static void *morecore_alloc (size_t bytes, size_t *retbytes)
 {
     void* result = NULL;
+    
+    // HACK: Morecore adds some nasty 8 bytes for the first free list header.
+    // Let's force it to place the header in the memory requested by malloc();
+    bytes -= 8;
 
     //TODO: error handing.
     errval_t err = paging_alloc (get_current_paging_state(), &result, bytes);

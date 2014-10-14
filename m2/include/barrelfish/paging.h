@@ -46,31 +46,70 @@ typedef int paging_flags_t;
 #define VREGION_FLAGS_READ_WRITE_MPB \
     (VREGION_FLAGS_READ | VREGION_FLAGS_WRITE | VREGION_FLAGS_MPB)
 
+    
+#define FRAME_SIZE (1024*1024)
+#define PAGE_SIZE (4*1024)
+struct frame_list;
+
 // struct to store the paging status of a process
 struct paging_state {
-    // TODO: add struct members to keep track of the page tables etc
+
+    // Virtual address space management:
+
+    // Keep track of reserved (valid) heap addresses.
+    // Valid addresses are in the range:
+    //      heap_begin <= x < heap_end
+    // NOTE: We don't support recycling of virtual addresses.
+    // Malloc usually doesn't return them anyway.
     lvaddr_t heap_begin;
     lvaddr_t heap_end;
-    
+
+    // Page table management:
+
+    // Keep track of allocated second-level page tables.
+    // A first-level page table always has 4096 entries.
+        // TODO: Maybe we can implement a dynamic structure 
+        // which doesn't waste a lot of memory.
+    struct ptable_lvl2* ptables [4096];
+    // ptable_mem is a simple memory manager for second-level page tables
+    struct slab_alloc ptable_mem;
+
+    // Frame management:
+
+    // Allocated frames are stored in a singly linked list.
+    // That way pages can be unmapped in a FIFO way
+    // if physical memory gets scarce.
+    // NOTE: Remove from head, insert at end.
+    struct frame_list* head;
+    struct frame_list* end;
+    // Simple memory manager for frame list.
+    struct slab_alloc frame_mem;
+
+    // The rest is obsolete:
     lvaddr_t heap_mapped;
     uint32_t last_l1_index;
     struct capref last_l2_table;
-    
     // Store the current frame to be filled.
     // Frames are always 1 MiB big and have [0..255] 4KiB slots.
     uint32_t last_frame_slot;
     struct capref current_frame;
-
-//     struct frame_list* static_frames;
-//     struct frame_list* revocable_frames;
 };
 
-// struct frame_list {
-//     struct capref frame;
-//     lvaddr_t pages [256];
-//     struct frame_list* next;
-// };
-// 
+// We only need to store if the page has been mapped at some point.
+// (Not mapped + Pagefault) -> allocate new, empty frame.
+// (Mapped + Pagefault) -> Paged out. Allocate frame & retrieve from disk.
+struct ptable_lvl2 {
+    struct capref lvl2_table;
+    bool page_exists [256];
+};
+
+// For each frame, store frame cap & pages residing on this frame.
+struct frame_list {
+    struct capref frame;
+    lvaddr_t pages [FRAME_SIZE / PAGE_SIZE]; // address is enough to identify a page.
+    struct frame_list* next;
+};
+
 // struct frame_mapping {
 //     struct capref frame;
 //     lvaddr_t page_address;
