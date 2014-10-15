@@ -21,9 +21,10 @@
 #include <stdio.h>
 #include <string.h>
 
-void page_in (lvaddr_t addr, bool is_revokable, size_t page_count);
 
 static struct paging_state current;
+static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t addr);
+static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l2_index);
 
 /**
  * \brief Helper function that allocates a slot and
@@ -53,11 +54,19 @@ static errval_t arml2_alloc(struct capref *ret)
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
 static char e_stack[S_SIZE];
 static char* e_stack_top = e_stack + S_SIZE;
+
+/**
+ * Exception handler for barrelfish.
+ */
 static void my_exception_handler (enum exception_type type, int subtype,
                                      void *addr, arch_registers_state_t *regs,
                                      arch_registers_fpu_state_t *fpuregs) 
 {
-//     debug_printf ("Hello Exception World! Got type %u, subtype %u, addr %X\n", type, subtype, addr);
+    // Print a small message, otherwise terminal fills up and computation takes ages.
+    printf ("!");
+    fflush (stdout);
+
+//    debug_printf ("Hello Exception World! Got type %u, subtype %u, addr %X\n", type, subtype, addr);
     lvaddr_t vaddr = (lvaddr_t) addr;
 
     if (type == EXCEPT_PAGEFAULT 
@@ -66,7 +75,7 @@ static void my_exception_handler (enum exception_type type, int subtype,
         && vaddr < current.heap_end )
     {
 #if 0
-        
+
         lvaddr_t mapped = current.heap_mapped;
         
         while (mapped <= vaddr) {
@@ -131,7 +140,7 @@ static void my_exception_handler (enum exception_type type, int subtype,
 
         current.heap_mapped = mapped;
 #else
-        page_in ((lvaddr_t) addr, true, 1);
+        paging_handle_pagefault (&current, (lvaddr_t) addr);
 #endif
     } else {
         debug_printf ("Invalid address!\n");
@@ -140,146 +149,239 @@ static void my_exception_handler (enum exception_type type, int subtype,
 }
 
 /**
- * Make sure that a page table for (addr) exists.
- * NOTE: This function might be called recursively in slab allocators.
+ * \brief Handle the page fault at address `addr'.
  *
-errval_t paging_allocate_ptable (lvaddr_t addr) {
-
-}//*/
-
-/**
- * Map the virtual address addr.
- * Must not be called if addr is already mapped.
+ * \param state: The current paging state.
+ * \param addr: The address at which the page fault occured.
  */
-void page_in (lvaddr_t addr, bool is_revokable, size_t page_count) {
+static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t addr)
+{
     int l1_index = ARM_L1_USER_OFFSET(addr);
     int l2_index = ARM_L2_USER_OFFSET(addr);
-    
     errval_t error = 0;
-    
-    struct ptable_lvl2* ptable = current.ptables [l1_index];
-//     debug_printf ("lvl1_index: %u, lvl2_index %u\n", l1_index, l2_index);
-    if (!is_revokable) debug_printf ("page in non-revokable memory\n");
-    
-    // Check if we already have a second-level page table.
-    if (!ptable) {
-        printf ("ptable_alloc\n");
-        
-        // Ask the kernel for a new table.
+
+    // Allocate a second-level page table if necessary.
+    if ( ! state -> ptables [l1_index] ) {
+        error = paging_allocate_ptable (state, l1_index);
+    }
+
+    if (err_is_ok (error)) {
+
+        // Check if we need to allocate a new frame.
+        if (state->flist_tail == NULL // => No frame available yet.
+                || state->flist_tail->next_free_slot >= FRAME_SLOTS) // => Frame is full.
+        {
+
+            // Unfortunately we need to allocate a frame.
+            // Get a new frame of default size FRAME_SIZE.
+
+            struct capref new_frame;
+            error = frame_alloc (&new_frame, FRAME_SIZE, NULL);
+
+            if (err_is_ok (error)) {
+
+                // Grab some dynamic memory for the list.
+                struct frame_list* node = slab_alloc ( &(state->frame_mem));
+
+                // The allocation should succeed as the allocator has a refill function.
+                assert (node);
+
+                // Initialize the node.
+                init_frame_list (node);
+                node -> frame = new_frame;
+
+                // Add our newly allocated node to the frame list.
+                if (state->flist_tail && state->flist_head) {
+                    // Extend the list.
+                    state->flist_tail -> next = node;
+                    state->flist_tail = node;
+                    state->flist_head = node;
+                } else {
+                    // We're the first node.
+                    assert (state->flist_tail == NULL && state->flist_head == NULL);
+                    state->flist_head = node;
+                    state->flist_tail = node;
+                }
+                printf ("\n");// need to flush printf buffer....
+                debug_printf ("Allocated a new frame of size 0x%X\n", FRAME_SIZE);
+            } else {
+                // Allocation was not successful.
+                cap_destroy (new_frame);
+            }
+        }
+
+        if (err_is_ok (error)) {
+            // We have a guarantee now that there's a frame and a
+            // second-level page table with some free capacity.
+            struct capref base_frame = state -> flist_tail -> frame;
+            struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
+
+            // Due to semantics we need to create a copy of the frame capability.
+            struct capref copied_frame;
+            slot_alloc (&copied_frame);
+            error = cap_copy (copied_frame, base_frame);
+
+            // Get the slot number.
+            int slot = state -> flist_tail -> next_free_slot;
+
+            if (err_is_ok (error)) {
+                // Map the page to the free frame slot.
+                error = vnode_map(cap_l2, copied_frame, l2_index, FLAGS, slot*PAGE_SIZE, 1);
+            }
+
+
+            if (err_is_ok (error)) {
+
+                // Now we need to do some additional bookkeeping.
+                state -> flist_tail -> next_free_slot = slot + 1;
+                state -> flist_tail -> pages [slot] = addr; // TODO: page alignment of addr.
+
+                // At this point we would also have to check if the page
+                // is currently paged out to disk.
+
+                if (state -> ptables [l1_index] -> page_exists [l2_index]) {
+                    // Uh-oh, paging in from disk not implemented yet.
+                    USER_PANIC ("Paging in from persistent memory not implemented\n");
+                } else {
+                    state -> ptables [l1_index] -> page_exists [l2_index] = true;
+                }
+
+            } else {
+                // Copy or mapping failed. Clean up any leftovers.
+                cap_destroy (copied_frame);
+            }
+        }
+    }
+
+    if (err_is_fail(error)) {
+        debug_printf ("Error while handling pagefault!\n");
+    }
+    return error;
+}
+
+/**
+ * \brief Allocate a second-level page table at the specified index.
+ * This function only works if the page table to be allocated doesn't exist yet.
+ *
+ * NOTE: This function might be called recursively in slab allocators.
+ *
+ * \param state: The current paging state.
+ * \param l1_index: The index at which the second-level page table is located.
+ */
+static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_index)
+{
+    debug_printf ("paging_allocate_ptable...\n");
+    assert (state -> ptables [l1_index] == NULL);
+
+    errval_t error = SYS_ERR_OK;
+
+    // Ask for a new page second-level table.
+    struct capref l2_cap;
+    error = arml2_alloc(&l2_cap);
+
+    // FIXME: What happens if the slot allocator runs out of space?
+
+    if (err_is_ok (error)) {
+
+        // Get the predefined capability for the first-level page table.
         struct capref l1_cap = (struct capref) {
             .cnode = cnode_page,
             .slot = 0,
         };
-        struct capref l2_cap;
-        error = arml2_alloc(&l2_cap); //TODO errors
-//         debug_printf ("%s\n", err_getstring(error));
-        error = vnode_map(l1_cap, l2_cap, l1_index, FLAGS, 0, 1); //TODO errors
-//         debug_printf ("%s\n", err_getstring(error));
-        
-        // Use our temporary table to store the result.
-        // TODO: not sure if temporary table works... 
-        // It might be better to store it right on the stack.
-        // Also, the overall function gets too big. This part should be factored out.
-        ptable = &current.temp_ptable;
-        init_ptable_lvl2 (ptable);
-        current.temp_ptable.lvl2_cap = l2_cap;
-        current.ptables [l1_index] = ptable;
 
-        // Allocate dynamic memory for our struct.
-        // NOTE: This may call ptable_refill() which in turn invokes page_in again.
-        // That's why we need to fiddle around with temporary tables.
-        ptable = (struct ptable_lvl2*) slab_alloc ( &(current.ptable_mem)); //TODO errors
-        // Copy the temporary table to its final destination.
-        memcpy (ptable, &current.temp_ptable, sizeof (struct ptable_lvl2));
-        // Don't forget to update the pointer.
-        current.ptables [l1_index] = ptable;
-//         debug_printf ("ptable allocated\n");
-    }
-    
-    // Great, we have a second-level page table now.
-    // Try to get a frame next.
-    // TODO: Support partial use of a frame.
+        // Now map the page table.
+        error = vnode_map(l1_cap, l2_cap, l1_index, FLAGS, 0, 1);
 
-    size_t frame_size = page_count * 4096;
+        if (err_is_fail (error)) {
+            // Mapping failed!
+            // Free resources and return.
+            cap_destroy (l2_cap);
 
-    if (is_revokable) {
-        
-        struct capref base_frame;
-        
-        if (current.flist_tail == NULL || current.flist_tail -> next_free_slot >= (FRAME_SIZE / PAGE_SIZE)) {
-            
-            // Ask the kernel for a frame.
-            size_t actual_size = 0;
-            error = frame_alloc(&base_frame, FRAME_SIZE, &actual_size); // TODO errors
-
-            // Grab some dynamic memory for the list.
-            struct frame_list* node = slab_alloc ( &(current.frame_mem));
-            init_frame_list (node);
-            
-            // Initialize the new frame with our data structure.
-            node -> frame = base_frame;
-            if (current.flist_tail && current.flist_head) {
-                // Extend the list.
-                current.flist_tail -> next = node;
-                current.flist_tail = node;
-                current.flist_head = node;
-            } else {
-                // We're the first node.
-                current.flist_head = node;
-                current.flist_tail = node;
-            }
-            debug_printf ("Got new frame\n");
         } else {
-            base_frame = current.flist_tail -> frame;
+            // If everything succeeded we can add the table to our paging state.
+
+            // Now it's getting messy... We need to allocate some dynamic memory
+            // for the new page table descriptor. If the slab allocator runs
+            // out of space however it will call memory_refill(), which again
+            // might call paging_allocate_ptable!
+
+            // Therefore we initialize the structure on the stack first and only copy
+            // it to dynamic memory if initialization succeeds.
+
+            struct ptable_lvl2 stack_allocated_descriptor;
+            init_ptable_lvl2 (&stack_allocated_descriptor);
+
+            stack_allocated_descriptor.lvl2_cap = l2_cap;
+            state -> ptables [l1_index] = &stack_allocated_descriptor;
+
+            // Let's do the allocation.
+            struct ptable_lvl2* new_ptable = NULL;
+            new_ptable = (struct ptable_lvl2*) slab_alloc ( &(state->ptable_mem) );
+
+            // As we have a refill function for the allocator it should not run out of space.
+            assert (new_ptable != NULL);
+
+            // Copy over our stack-allocated descriptor.
+            memcpy (new_ptable, &stack_allocated_descriptor, sizeof (struct ptable_lvl2));
+
+            // Finally, we need to update the pointer.
+            state -> ptables [l1_index] = new_ptable;
         }
-        
-        
-        int i = current.flist_tail -> next_free_slot;
-        
-        // Copy a frame.
-        struct capref copied_frame;
-        slot_alloc (&copied_frame);
-        error = cap_copy (copied_frame, base_frame); // TODO errors
-
-        // Map the virtual address to our frame.
-        error = vnode_map(ptable -> lvl2_cap, copied_frame, l2_index, FLAGS, i*PAGE_SIZE, 1);// TODO errors
-
-        
-        // Need to do some additional bookkeeping if pages can be revoked later.
-
-        // Perform some bookkeeping for every newly mapped page.
-//        for (int i=0; i<page_count; i++) {
-        current.flist_tail -> next_free_slot = i+1;
-
-            // Let the frame know which pages it contains.
-            current.flist_tail -> pages [i] = addr;
-
-            // Check if the page is paged out to persistent storage.
-            if (ptable -> page_exists [l2_index]) {
-                // Uh-oh, paging stuff in and out not implemented yet.
-                USER_PANIC ("Paging in from persistent memory not implemented\n");
-            } else {
-                // Update page table entry.
-                ptable -> page_exists [l2_index] = true;
-            }
-//         }
-        
-        
-    } else { // TODO Split page_in into two functions, for revokable and irrevokable memory.
-        
-    // Ask the kernel for a frame.
-        struct capref new_frame;
-        debug_printf ("blub: %X\n", frame_size);
-        
-        error = frame_alloc(&new_frame, frame_size, &frame_size); // TODO errors
-        debug_printf ("Requested pages: %u, actual pages: %u\n", page_count, frame_size/4096);
-        debug_printf ("%s\n", err_getstring(error));
-        
-        // Map the virtual address to our frame.
-        error = vnode_map(ptable -> lvl2_cap, new_frame, l2_index, FLAGS, 0, page_count);// TODO errors
-        debug_printf ("%s\n", err_getstring(error));
-        debug_printf ("blab\n");
     }
+    debug_printf ("paging_allocate_ptable: %s!\n", err_getstring (error));
+    return error;
+}
+
+/**
+ * Map `page_count' pages to a physical frame starting from `base_addr'.
+ *
+ * \param state: The current paging state.
+ * \param base_addr: The virtual base address. Must be page aligned.
+ * \param page_count: The number of pages to map.
+ */
+__attribute__((unused))
+static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_addr, size_t page_count)
+{
+    debug_printf ("paging_map_eagerly...\n");
+
+    // Enforce page alignment restriction.
+    assert ((base_addr & (PAGE_SIZE-1)) == 0);
+
+    int l1_index = ARM_L1_USER_OFFSET(base_addr);
+    int l2_index = ARM_L2_USER_OFFSET(base_addr);
+    errval_t error = 0;
+
+    // Allocate a second-level page table if necessary.
+    if ( ! state->ptables [l1_index] ) {
+        error = paging_allocate_ptable (state, l1_index);
+    }
+
+    if (err_is_ok (error)) {
+
+        // Ask for a frame of correct size.
+        size_t requested_size = page_count * PAGE_SIZE;
+        struct capref new_frame;
+        error = frame_alloc(&new_frame, requested_size, NULL);
+
+        if (err_is_ok (error)) {
+
+           // Get the capability for the second-level page table.
+           struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
+
+            // We got a frame. Map it to the specified addresses.
+           error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, 0, page_count);
+
+         }
+
+         if (err_is_fail (error)) {
+            // Allocation or mapping failed!
+            // Return frame cap and report error.
+            cap_destroy (new_frame);
+        }
+    }
+
+    debug_printf ("paging_map_eagerly: %s\n", err_getstring(error));
+    return error;
 }
 
 void init_ptable_lvl2 (struct ptable_lvl2* ptable) 
@@ -291,31 +393,44 @@ void init_frame_list (struct frame_list* node)
     memset (node, 0, sizeof(struct frame_list));
 }
 
+/**
+ * Refill memory for slab allocators.
+ * By default always refills with 1 MiB.
+ *
+ * TODO: Handle the case when the block of pages spans
+ * over multiple page tables.
+ */
 static errval_t memory_refill (struct slab_alloc* allocator) {
-    
-    debug_printf ("Refill stuff\n");
-    // Reserve 32 pages (128 KiB);
+    debug_printf ("memory_refill...\n");
+
+    // TODO: Discuss size.
+    // Reserve 256 pages (1 MiB);
     size_t pages = 256;
-    size_t bytes = pages * 4096;
-    
-    void* buf;
+    size_t bytes = pages * PAGE_SIZE;
+
     // Need to reserve virtual space.
+    void* buf;
     errval_t err = paging_alloc (&current, &buf, bytes);
+
+    // Map the allocated virtual space.
+    // This is needed as the memory is used for page table
+    // management (i.e. by the page fault handler), and a double
+    // page fault would be deadly.
+    paging_map_eagerly (&current, (lvaddr_t) buf, pages);
     
-    page_in ((lvaddr_t) buf, false, pages);
-    
+    // Let the slab allocator initialize the new space.
     if (err_is_ok (err)) {
         slab_grow (allocator, buf, bytes);
     }
-    debug_printf ("End refilling\n");
+
+    debug_printf ("memory_fill: %s\n", err_getstring(err));
     return err;
 }
 
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
     debug_printf("paging_init_state, start %X\n", start_vaddr);
-//     debug_printf ("Size of struct capref: %u", sizeof(struct capref));
-    
+
     // Make sure we have zeroed out memory.
     memset (st, 0, sizeof (struct paging_state));
     
@@ -338,14 +453,14 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 errval_t paging_init(void)
 {
     debug_printf("paging_init\n");
-    // TODO: initialize self-paging handler
+    // Initialize self-paging handler.
     // TIP: use thread_set_exception_handler() to setup a page fault handler
-    void* oldbase = 0;
-    void* oldtop = 0;
-    thread_set_exception_handler (&my_exception_handler, NULL, e_stack, e_stack_top, &oldbase, &oldtop);
-//     debug_printf ("Got old stack base: %X, old stack top: %X\n", oldbase, oldtop);
+    thread_set_exception_handler (&my_exception_handler, NULL, e_stack, e_stack_top, NULL, NULL);
+
     // TIP: Think about the fact that later on, you'll have to make sure that
     // you can handle page faults in any thread of a domain.
+    // TODO: what exactly does this mean?
+
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
     
@@ -395,37 +510,53 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
     debug_printf ("paging_region_map: %X, addr %X, current %X, req %u\n", pr, pr->base_addr, pr -> current_addr, req_size);
     // BUG: we may get a region that is not initialized from multi_alloc() (multi_slot_alloc.c, line 106)!
     if (pr -> base_addr == 0) {
-        paging_region_init (&current, pr, FRAME_SIZE);
+
+        // TODO Which size?? Experiments show that it needs about 32 pages.
+        // Actually it would be a lot better if we could tell the
+        // slab allocator to just use the refill function...
+        paging_region_init (&current, pr,
+                           FRAME_SIZE
+                           //32*PAGE_SIZE
+
+        );
     }
     
     if (pr->base_addr == pr->current_addr) {
-        page_in (pr->base_addr, false, (pr->region_size)/PAGE_SIZE);
-        *retbuf = (void*) pr -> base_addr;
-        *ret_size = pr -> region_size;
-        pr -> current_addr += *ret_size;
-        debug_printf ("paging_region_map_success\n");
-        return SYS_ERR_OK;
+        // TODO: Support some lazyness, i.e. don't map the whole region at once.
+        errval_t error = paging_map_eagerly (&current, pr -> base_addr, pr -> region_size/ PAGE_SIZE);
+
+        if (err_is_ok (error)) {
+            *retbuf = (void*) pr -> base_addr;
+            *ret_size = pr -> region_size;
+            pr -> current_addr += *ret_size;
+        } else {
+            *retbuf = 0;
+            *ret_size = 0;
+        }
+        debug_printf ("paging_region_map: %s\n", err_getstring (error));
+        return error;
     } else {
         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
     }
 
-    lvaddr_t end_addr = pr->base_addr + pr->region_size;
-    size_t rem = end_addr - pr->current_addr;
-    if (rem > req_size) {
-        // ok
-        *retbuf = (void*)pr->current_addr;
-        *ret_size = req_size;
-        pr->current_addr += req_size;
-    } else if (rem > 0) {
-        *retbuf = (void*)pr->current_addr;
-        *ret_size = rem;
-        pr->current_addr += rem;
-        debug_printf("exhausted paging region, "
-                "expect badness on next allocation\n");
-    } else {
-        return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
-    }
-    return SYS_ERR_OK;
+    // NOTE: This was the old implementation:
+//     lvaddr_t end_addr = pr->base_addr + pr->region_size;
+//     size_t rem = end_addr - pr->current_addr;
+//     if (rem > req_size) {
+//         // ok
+//         *retbuf = (void*)pr->current_addr;
+//         *ret_size = req_size;
+//         pr->current_addr += req_size;
+//     } else if (rem > 0) {
+//         *retbuf = (void*)pr->current_addr;
+//         *ret_size = rem;
+//         pr->current_addr += rem;
+//         debug_printf("exhausted paging region, "
+//                 "expect badness on next allocation\n");
+//     } else {
+//         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
+//     }
+//     return SYS_ERR_OK;
 }
 
 /**
@@ -444,18 +575,13 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
 /**
  * \brief Find a bit of free virtual address space that is large enough to
  *        accomodate a buffer of size `bytes`.
- * TODO: you need to implement this function using the knowledge of your
- * self-paging implementation about where you have already mapped frames.
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
     assert (st = &current);
-    printf ("Paging alloc with bytes %X\n", bytes);
-    if (bytes << 20 != 0) {
-        debug_printf ("Error in paging_alloc: bytes not page aligned.\n");
-        abort();
-    }
-    
+    assert ((bytes & (PAGE_SIZE-1)) == 0);
+
+    debug_printf ("paging_alloc: allocated %X bytes\n.", bytes);
     *buf = (void*)  st -> heap_end;
     st -> heap_end += bytes;
     return SYS_ERR_OK;

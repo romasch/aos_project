@@ -31,11 +31,6 @@ typedef int paging_flags_t;
 #define ARM_L2_USER_OFFSET(addr) ((addr)>>12 & 0x3ff)
 #define ARM_L2_USER_ENTRIES 1024u
 
-// #define ARM_L1_USER_OFFSET(addr) ((addr)>>20)
-// #define ARM_L1_USER_ENTRIES 4096u
-// #define ARM_L2_USER_OFFSET(addr) ((addr) << 12 >> 24)
-// #define ARM_L2_USER_ENTRIES 256u
-
 #define VREGION_FLAGS_READ     0x01 // Reading allowed
 #define VREGION_FLAGS_WRITE    0x02 // Writing allowed
 #define VREGION_FLAGS_EXECUTE  0x04 // Execute allowed
@@ -56,6 +51,7 @@ typedef int paging_flags_t;
     
 #define FRAME_SIZE (1024u*1024u)
 #define PAGE_SIZE (4*1024)
+#define FRAME_SLOTS 256u
 struct frame_list;
 
 // We only need to store if the page has been mapped at some point.
@@ -82,9 +78,7 @@ struct paging_state {
     // Page table management:
 
     // Keep track of allocated second-level page tables.
-    // A first-level page table always has 4096 entries. TODO adapt comment
-        // TODO: Maybe we can implement a dynamic structure 
-        // which doesn't waste a lot of memory.
+    // A first-level page table always has ARM_L1_USER_ENTRIES entries.
     struct ptable_lvl2* ptables [ARM_L1_USER_ENTRIES];
     // ptable_mem is a simple memory manager for second-level page tables
     struct slab_alloc ptable_mem;
@@ -125,11 +119,7 @@ struct frame_list {
 };
 void init_frame_list (struct frame_list* node);
 
-// struct frame_mapping {
-//     struct capref frame;
-//     lvaddr_t page_address;
-//     uint32_t offset;
-// };
+
 
 struct thread;
 /// Initialize paging_state struct
