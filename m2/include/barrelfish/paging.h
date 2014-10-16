@@ -18,6 +18,7 @@
 
 #include <errors/errno.h>
 #include <barrelfish/capabilities.h>
+#include <string.h>
 
 typedef int paging_flags_t;
 
@@ -62,6 +63,29 @@ struct ptable_lvl2 {
     bool page_exists [ARM_L2_USER_ENTRIES];
 };
 
+
+
+// For each frame, store frame cap & pages residing on this frame.
+// Need to call cap_revoke() when unmapping the frame, as copies are not stored.
+struct frame_list {
+    struct capref frame;
+    uint32_t next_free_slot;
+    lvaddr_t pages [FRAME_SIZE / PAGE_SIZE]; // address is enough to identify a page.
+    struct frame_list* next;
+};
+
+/// Initialize a ptable struct
+static inline void init_ptable_lvl2 (struct ptable_lvl2* ptable)
+{
+    memset (ptable, 0, sizeof(struct ptable_lvl2));
+}
+
+/// Initialize a frame list struct.
+static inline void init_frame_list (struct frame_list* node)
+{
+    memset (node, 0, sizeof(struct frame_list));
+}
+
 // struct to store the paging status of a process
 struct paging_state {
 
@@ -82,8 +106,6 @@ struct paging_state {
     struct ptable_lvl2* ptables [ARM_L1_USER_ENTRIES];
     // ptable_mem is a simple memory manager for second-level page tables
     struct slab_alloc ptable_mem;
-    // Temporary space for a lvl2 page table to avoid some endless recursion.
-    struct ptable_lvl2 temp_ptable;
 
     // Frame management:
 
@@ -95,31 +117,7 @@ struct paging_state {
     struct frame_list* flist_tail;
     // Simple memory manager for frame list.
     struct slab_alloc frame_mem;
-
-    // The rest is obsolete:
-    lvaddr_t heap_mapped;
-    uint32_t last_l1_index;
-    struct capref last_l2_table;
-    // Store the current frame to be filled.
-    // Frames are always 1 MiB big and have [0..255] 4KiB slots.
-    uint32_t last_frame_slot;
-    struct capref current_frame;
 };
-
-
-void init_ptable_lvl2 (struct ptable_lvl2* ptable);
-
-// For each frame, store frame cap & pages residing on this frame.
-// Need to call cap_revoke() when unmapping the frame, as copies are not stored.
-struct frame_list {
-    struct capref frame;
-    uint32_t next_free_slot;
-    lvaddr_t pages [FRAME_SIZE / PAGE_SIZE]; // address is enough to identify a page.
-    struct frame_list* next;
-};
-void init_frame_list (struct frame_list* node);
-
-
 
 struct thread;
 /// Initialize paging_state struct

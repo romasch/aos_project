@@ -26,20 +26,24 @@
 
 // Predefined paging region for slot allocator.
 // This is defined by us as a workaround to a bug.
-// TODO Which size?? Experiments show that it needs about 32 pages for a 48MB array.
+// TODO Which size?? Experiments show that it needs about 32 pages for an 48MB array.
 #define SLOT_REGION_SIZE FRAME_SIZE
 
 
-
+// A global paging state instance.
 static struct paging_state current;
+
+// Forward declarations.
 static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t addr);
 static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l2_index);
+static errval_t arml2_alloc(struct capref *ret);
+static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_addr, uint32_t page_count);
+static errval_t memory_refill (struct slab_alloc* allocator);
 
 /**
  * \brief Helper function that allocates a slot and
  *        creates a ARM l2 page table capability
  */
-__attribute__((unused))
 static errval_t arml2_alloc(struct capref *ret)
 {
     errval_t err;
@@ -56,9 +60,6 @@ static errval_t arml2_alloc(struct capref *ret)
     return SYS_ERR_OK;
 }
 
-// TODO: implement page fault handler that installs frames when a page fault
-// occurs and keeps track of the virtual address space.
-
 #define S_SIZE 2*8192
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
 static char e_stack[S_SIZE];
@@ -74,8 +75,9 @@ static void my_exception_handler (enum exception_type type, int subtype,
     // Print a small message, otherwise terminal fills up and computation takes ages.
     printf ("!");
     fflush (stdout);
+//     debug_printf ("Hello Exception World!\n");
+//     debug_printf ("Got type %u, subtype %u, addr %X\n", type, subtype, addr);
 
-//    debug_printf ("Hello Exception World! Got type %u, subtype %u, addr %X\n", type, subtype, addr);
     lvaddr_t vaddr = (lvaddr_t) addr;
 
     if (type == EXCEPT_PAGEFAULT 
@@ -83,74 +85,7 @@ static void my_exception_handler (enum exception_type type, int subtype,
         && current.heap_begin <= vaddr 
         && vaddr < current.heap_end )
     {
-#if 0
-
-        lvaddr_t mapped = current.heap_mapped;
-        
-        while (mapped <= vaddr) {
-            
-            int l1_index = ARM_L1_USER_OFFSET(mapped);
-            int l2_index = ARM_L2_USER_OFFSET(mapped);
-            struct capref l1_table = (struct capref) {
-            .cnode = cnode_page,
-            .slot = 0,
-            };
-            // would need checks if ptables exist already
-            struct capref l2_table;
-            if (current.last_l1_index != l1_index) {
-                arml2_alloc(&l2_table);
-                vnode_map(l1_table, l2_table, l1_index, FLAGS, 0, 1);
-                
-                current.last_l1_index = l1_index;
-                current.last_l2_table = l2_table;
-            } else {
-                l2_table = current.last_l2_table;
-            }
-            
-            // TODO: Split frames to perform mappings of less than 1 MB.
-
-            size_t frame_size = 1024 * 1024u; // 1 MiB
-
-/*            frame_alloc(&frame, frame_size, &frame_size);
-
-            errval_t err = vnode_map(l2_table, frame, l2_index, FLAGS, 0, 256);
-
-            if (err_is_fail(err)) {
-                debug_printf ("Mapping failed: %s\n", err_getstring (err));
-                abort();
-            }
-            //*/
-            if (current.last_frame_slot < 0 || current.last_frame_slot >= 255) {
-                // No more space in current frame.
-                struct capref alloc_frame;
-                frame_alloc(&alloc_frame, frame_size, &frame_size);
-                debug_printf ("Allocated 0x%X bytes\n", frame_size); 
-                current.current_frame = alloc_frame;
-                current.last_frame_slot = -1;
-            }
-            
-            struct capref frame;
-            slot_alloc (&frame);
-            cap_copy (frame, current.current_frame);
-//             frame = current.current_frame;
-            uint32_t slot = current.last_frame_slot + 1;
-            current.last_frame_slot = slot;
-//             debug_printf ("slot %u\n", slot);
-
-            size_t page_size = 4096u;
-            errval_t err = vnode_map(l2_table, frame, l2_index, FLAGS, slot*page_size, 1);
-            if (err_is_fail(err)) {
-                debug_printf ("Mapping failed: %s\n", err_getstring (err));
-                abort();
-            }//*/
-
-            mapped += page_size;
-        }
-
-        current.heap_mapped = mapped;
-#else
         paging_handle_pagefault (&current, (lvaddr_t) addr);
-#endif
     } else {
         debug_printf ("Invalid address!\n");
         abort();
@@ -418,21 +353,12 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
     return error;
 }
 
-void init_ptable_lvl2 (struct ptable_lvl2* ptable) 
-{
-    memset (ptable, 0, sizeof(struct ptable_lvl2));
-}
-void init_frame_list (struct frame_list* node)
-{
-    memset (node, 0, sizeof(struct frame_list));
-}
-
 /**
  * Refill memory for slab allocators.
  * By default always refills with SLAB_REFILL_PAGE_COUNT pages.
- *
  */
-static errval_t memory_refill (struct slab_alloc* allocator) {
+static errval_t memory_refill (struct slab_alloc* allocator)
+{
     debug_printf ("memory_refill...\n");
 
     // Initialize constants.
@@ -458,26 +384,24 @@ static errval_t memory_refill (struct slab_alloc* allocator) {
     return err;
 }
 
-errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
+/**
+ * Initialize a paging_state struct.
+*/
+errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
     debug_printf("paging_init_state, start %X\n", start_vaddr);
 
     // Make sure we have zeroed out memory.
     memset (st, 0, sizeof (struct paging_state));
-    
+
     // Initialize virtual address space.
     st -> heap_begin = start_vaddr;
     st -> heap_end = start_vaddr;
-    
+
     // Initialize dynamic memory for management.
     slab_init (&(st->ptable_mem), sizeof (struct ptable_lvl2), memory_refill);
     slab_init (&(st->frame_mem), sizeof (struct frame_list), memory_refill);
 
-    // TODO: remove obsolte stuff
-    st ->  heap_mapped = start_vaddr;
-    st -> last_l1_index = -1;
-    st -> last_frame_slot = -1;
-    
     return SYS_ERR_OK;
 }
 
@@ -498,7 +422,9 @@ errval_t paging_init(void)
     //TODO WTF is: struct capref pdir
     struct capref pdir;
     //TODO check if VADDR_OFFSET is ok as the start of our heap.
-    paging_init_state (&current, VADDR_OFFSET, pdir);
+    //paging_init_state (&current, VADDR_OFFSET, pdir);
+    paging_init_state (&current, VADDR_OFFSET/2, pdir);
+
     set_current_paging_state(&current);
     return SYS_ERR_OK;
 }
@@ -523,6 +449,7 @@ errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, s
         debug_printf("paging_region_init: paging_alloc failed\n");
         return err_push(err, LIB_ERR_VSPACE_MMU_AWARE_INIT);
     }
+
     pr->base_addr    = (lvaddr_t)base;
     pr->current_addr = pr->base_addr;
     pr->region_size  = size;
@@ -538,8 +465,14 @@ errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, s
 errval_t paging_region_map(struct paging_region *pr, size_t req_size,
                            void **retbuf, size_t *ret_size)
 {
-    debug_printf ("paging_region_map: %X, addr %X, current %X, req %u\n", pr, pr->base_addr, pr -> current_addr, req_size);
-    // BUG: we may get a region that is not initialized from multi_alloc() (multi_slot_alloc.c, line 106)!
+    debug_printf ("paging_region_map: %X, addr %X, current %X, req %u\n"
+        , pr
+        , pr->base_addr
+        , pr -> current_addr
+        , req_size);
+
+    // BUG: we may get a region that is not initialized
+    // from multi_alloc() (multi_slot_alloc.c, line 106)!
     if (pr -> base_addr == 0) {
         paging_region_init (&current, pr, SLOT_REGION_SIZE);
     }

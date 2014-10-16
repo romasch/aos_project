@@ -22,6 +22,7 @@ struct bootinfo *bi;
 
 #define MALLOC_BUFSIZE (1UL<<20)
 #define BUFSIZE (48UL * 1024 * 1024) // 48MB
+// #define BUFSIZE (256UL * 1024 * 1024) // 256MB
 #define SAFE_VADDR (1UL<<25)
 
 int main(int argc, char *argv[])
