@@ -22,13 +22,15 @@
 #include <string.h>
 
 // Default page count for refill requests by slab data structures.
-#define SLAB_REFILL_PAGE_COUNT 256u
+#define SLAB_REFILL_PAGE_COUNT 32u
 
 // Predefined paging region for slot allocator.
 // This is defined by us as a workaround to a bug.
 // TODO Which size?? Experiments show that it needs about 32 pages for an 48MB array.
 #define SLOT_REGION_SIZE FRAME_SIZE
 
+// HACK to insert newlines after eclamation marks by page fault handler.
+#define debug_printf printf("\n"); debug_printf
 
 // A global paging state instance.
 static struct paging_state current;
@@ -146,7 +148,6 @@ static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t ad
                     state->flist_head = node;
                     state->flist_tail = node;
                 }
-                printf ("\n");// need to flush printf buffer....
                 debug_printf ("Allocated a new frame of size 0x%X\n", FRAME_SIZE);
             } else {
                 // Allocation was not successful.
@@ -380,7 +381,7 @@ static errval_t memory_refill (struct slab_alloc* allocator)
         slab_grow (allocator, buf, bytes);
     }
 
-    debug_printf ("memory_fill: %s\n", err_getstring(err));
+    debug_printf ("memory_refill: %s\n", err_getstring(err));
     return err;
 }
 
@@ -418,12 +419,12 @@ errval_t paging_init(void)
 
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
-    
+
     //TODO WTF is: struct capref pdir
     struct capref pdir;
+
     //TODO check if VADDR_OFFSET is ok as the start of our heap.
-    //paging_init_state (&current, VADDR_OFFSET, pdir);
-    paging_init_state (&current, VADDR_OFFSET/2, pdir);
+    paging_init_state (&current, VADDR_OFFSET, pdir);
 
     set_current_paging_state(&current);
     return SYS_ERR_OK;
@@ -476,43 +477,39 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
     if (pr -> base_addr == 0) {
         paging_region_init (&current, pr, SLOT_REGION_SIZE);
     }
-    
-    if (pr->base_addr == pr->current_addr) {
-        // TODO: Support some lazyness, i.e. don't map the whole region at once.
-        errval_t error = paging_map_eagerly (&current, pr -> base_addr, pr -> region_size/ PAGE_SIZE);
 
-        if (err_is_ok (error)) {
-            *retbuf = (void*) pr -> base_addr;
-            *ret_size = pr -> region_size;
-            pr -> current_addr += *ret_size;
-        } else {
-            *retbuf = 0;
-            *ret_size = 0;
-        }
-        debug_printf ("paging_region_map: %s\n", err_getstring (error));
-        return error;
+    lvaddr_t end_addr = pr->base_addr + pr->region_size;
+    size_t remaining = end_addr - pr->current_addr;
+
+    assert ((pr->region_size & (PAGE_SIZE-1)) == 0); // region size should be page aligned.
+    assert ((remaining & (PAGE_SIZE-1)) == 0); // remaining bytes should be page aligned.
+
+    uint32_t pages_to_map = 0;
+
+    if (req_size < remaining) {
+
+        // Align to pages.
+        pages_to_map = req_size / PAGE_SIZE + 1;
+
+    } else if (remaining > 0) {
+
+        pages_to_map = remaining / PAGE_SIZE;
+        debug_printf("exhausted paging region, "
+                "expect badness on next allocation\n");
     } else {
         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
     }
 
-    // NOTE: This was the old implementation:
-//     lvaddr_t end_addr = pr->base_addr + pr->region_size;
-//     size_t rem = end_addr - pr->current_addr;
-//     if (rem > req_size) {
-//         // ok
-//         *retbuf = (void*)pr->current_addr;
-//         *ret_size = req_size;
-//         pr->current_addr += req_size;
-//     } else if (rem > 0) {
-//         *retbuf = (void*)pr->current_addr;
-//         *ret_size = rem;
-//         pr->current_addr += rem;
-//         debug_printf("exhausted paging region, "
-//                 "expect badness on next allocation\n");
-//     } else {
-//         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
-//     }
-//     return SYS_ERR_OK;
+    errval_t error = paging_map_eagerly (&current, pr -> current_addr, pages_to_map);
+
+    if (err_is_ok (error)) {
+        *retbuf = (void*)pr->current_addr;
+        *ret_size = pages_to_map * PAGE_SIZE;
+        pr->current_addr += *ret_size;
+    }
+
+    debug_printf ("paging_region_map: %s\n", err_getstring (error));
+    return error;
 }
 
 /**
