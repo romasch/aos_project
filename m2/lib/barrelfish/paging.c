@@ -21,6 +21,15 @@
 #include <stdio.h>
 #include <string.h>
 
+// Default page count for refill requests by slab data structures.
+#define SLAB_REFILL_PAGE_COUNT 256u
+
+// Predefined paging region for slot allocator.
+// This is defined by us as a workaround to a bug.
+// TODO Which size?? Experiments show that it needs about 32 pages for a 48MB array.
+#define SLOT_REGION_SIZE FRAME_SIZE
+
+
 
 static struct paging_state current;
 static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t addr);
@@ -234,7 +243,7 @@ static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t ad
 
                 // Now we need to do some additional bookkeeping.
                 state -> flist_tail -> next_free_slot = slot + 1;
-                state -> flist_tail -> pages [slot] = addr; // TODO: page alignment of addr.
+                state -> flist_tail -> pages [slot] = (addr & (PAGE_SIZE-1)); // page aligned address.
 
                 // At this point we would also have to check if the page
                 // is currently paged out to disk.
@@ -279,8 +288,6 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
     struct capref l2_cap;
     error = arml2_alloc(&l2_cap);
 
-    // FIXME: What happens if the slot allocator runs out of space?
-
     if (err_is_ok (error)) {
 
         // Get the predefined capability for the first-level page table.
@@ -306,7 +313,7 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
             // might call paging_allocate_ptable!
 
             // Therefore we initialize the structure on the stack first and only copy
-            // it to dynamic memory if initialization succeeds.
+            // it to dynamic memory when initialization succeeds.
 
             struct ptable_lvl2 stack_allocated_descriptor;
             init_ptable_lvl2 (&stack_allocated_descriptor);
@@ -339,45 +346,72 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
  * \param base_addr: The virtual base address. Must be page aligned.
  * \param page_count: The number of pages to map.
  */
-__attribute__((unused))
-static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_addr, size_t page_count)
+static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_addr, uint32_t page_count)
 {
     debug_printf ("paging_map_eagerly...\n");
 
     // Enforce page alignment restriction.
     assert ((base_addr & (PAGE_SIZE-1)) == 0);
 
-    int l1_index = ARM_L1_USER_OFFSET(base_addr);
-    int l2_index = ARM_L2_USER_OFFSET(base_addr);
-    errval_t error = 0;
 
-    // Allocate a second-level page table if necessary.
-    if ( ! state->ptables [l1_index] ) {
-        error = paging_allocate_ptable (state, l1_index);
-    }
+    errval_t error = SYS_ERR_OK;
 
-    if (err_is_ok (error)) {
 
-        // Ask for a frame of correct size.
-        size_t requested_size = page_count * PAGE_SIZE;
-        struct capref new_frame;
-        error = frame_alloc(&new_frame, requested_size, NULL);
+    // First ask for a frame of correct size.
+    size_t requested_size = page_count * PAGE_SIZE;
+    struct capref new_frame;
+    error = frame_alloc(&new_frame, requested_size, NULL);
+
+    uint32_t remaining_pages = page_count;
+    lvaddr_t mapped_addr = base_addr;
+
+    while (remaining_pages > 0 && err_is_ok (error)) {
+
+        // Now map all pages to the correct second-level page table.
+        int l1_index = ARM_L1_USER_OFFSET (mapped_addr);
+        int l2_index = ARM_L2_USER_OFFSET (mapped_addr);
+
+        // Allocate a second-level page table if necessary.
+        if ( ! state->ptables [l1_index] ) {
+            error = paging_allocate_ptable (state, l1_index);
+        }
 
         if (err_is_ok (error)) {
 
-           // Get the capability for the second-level page table.
-           struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
+            // Get the capability for the second-level page table.
+            struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
 
-            // We got a frame. Map it to the specified addresses.
-           error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, 0, page_count);
+            // Figure out how many page table entries are still free.
+            uint32_t free_slots = ARM_L2_USER_ENTRIES - l2_index;
 
-         }
+            if (free_slots <= remaining_pages) {
+                debug_printf ("paging_map_eagerly: page region spans over multiple ptables\n");
+                // ouch, need to allocate another page table...
+                // Map at least part of it.
+                struct capref copied_frame;
+                slot_alloc (&copied_frame);
+                error = cap_copy (copied_frame, new_frame);
 
-         if (err_is_fail (error)) {
-            // Allocation or mapping failed!
-            // Return frame cap and report error.
-            cap_destroy (new_frame);
+                if (err_is_ok (error)) {
+                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, 0, free_slots);
+                    remaining_pages -= free_slots;
+                    mapped_addr += free_slots * PAGE_SIZE;
+                } else {
+                    cap_destroy (copied_frame);
+                }
+            } else {
+                // Everything fits into the current page table.
+                // Map it to the specified addresses.
+                error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, 0, remaining_pages);
+                remaining_pages = 0;
+            }
         }
+    }
+
+    if (err_is_fail (error)) {
+        // Mapping or allocation failed!
+        // Return frame cap and report error.
+        cap_destroy (new_frame);
     }
 
     debug_printf ("paging_map_eagerly: %s\n", err_getstring(error));
@@ -395,17 +429,14 @@ void init_frame_list (struct frame_list* node)
 
 /**
  * Refill memory for slab allocators.
- * By default always refills with 1 MiB.
+ * By default always refills with SLAB_REFILL_PAGE_COUNT pages.
  *
- * TODO: Handle the case when the block of pages spans
- * over multiple page tables.
  */
 static errval_t memory_refill (struct slab_alloc* allocator) {
     debug_printf ("memory_refill...\n");
 
-    // TODO: Discuss size.
-    // Reserve 256 pages (1 MiB);
-    size_t pages = 256;
+    // Initialize constants.
+    size_t pages = SLAB_REFILL_PAGE_COUNT;
     size_t bytes = pages * PAGE_SIZE;
 
     // Need to reserve virtual space.
@@ -510,15 +541,7 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
     debug_printf ("paging_region_map: %X, addr %X, current %X, req %u\n", pr, pr->base_addr, pr -> current_addr, req_size);
     // BUG: we may get a region that is not initialized from multi_alloc() (multi_slot_alloc.c, line 106)!
     if (pr -> base_addr == 0) {
-
-        // TODO Which size?? Experiments show that it needs about 32 pages.
-        // Actually it would be a lot better if we could tell the
-        // slab allocator to just use the refill function...
-        paging_region_init (&current, pr,
-                           FRAME_SIZE
-                           //32*PAGE_SIZE
-
-        );
+        paging_region_init (&current, pr, SLOT_REGION_SIZE);
     }
     
     if (pr->base_addr == pr->current_addr) {
