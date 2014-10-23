@@ -22,5 +22,6 @@
 extern struct bootinfo *bi;
 
 errval_t initialize_ram_alloc(void);
+errval_t initialize_mem_serv(void);
 
 #endif // INIT_H
