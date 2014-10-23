@@ -444,8 +444,13 @@ void paging_init_onthread(struct thread *t)
 errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, size_t size)
 {
     debug_printf ("paging_region_init: %X\n", pr);
+
+    // Align requested size to page boundary.
+    int aligned_size = ((size-1) & ~(PAGE_SIZE-1)) + PAGE_SIZE;
+
     void *base;
-    errval_t err = paging_alloc(st, &base, size);
+    errval_t err = paging_alloc(st, &base, aligned_size);
+
     if (err_is_fail(err)) {
         debug_printf("paging_region_init: paging_alloc failed\n");
         return err_push(err, LIB_ERR_VSPACE_MMU_AWARE_INIT);
@@ -453,7 +458,7 @@ errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, s
 
     pr->base_addr    = (lvaddr_t)base;
     pr->current_addr = pr->base_addr;
-    pr->region_size  = size;
+    pr->region_size  = aligned_size;
     // TODO: maybe add paging regions to paging state?
     return SYS_ERR_OK;
 }
@@ -531,10 +536,10 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
+    debug_printf ("paging_alloc: allocating %X bytes\n.", bytes);
     assert (st = &current);
     assert ((bytes & (PAGE_SIZE-1)) == 0);
 
-    debug_printf ("paging_alloc: allocated %X bytes\n.", bytes);
     *buf = (void*)  st -> heap_end;
     st -> heap_end += bytes;
     return SYS_ERR_OK;
