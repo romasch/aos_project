@@ -1,0 +1,56 @@
+diff --git a/kernel/arch/omap44xx/paging.c b/kernel/arch/omap44xx/paging.c
+index cf02b8b..2afdb94 100644
+--- a/kernel/arch/omap44xx/paging.c
++++ b/kernel/arch/omap44xx/paging.c
+@@ -352,8 +352,10 @@ caps_map_l1(struct capability* dest,
+ 
+     union arm_l1_entry* entry = (union arm_l1_entry*)dest_lvaddr + (slot * ARM_L1_SCALE);
+ 
+-    if (entry->page_table.type != L1_TYPE_INVALID_ENTRY) {
+-        panic("Remapping valid page table.");
++    for (int i = 0; i < 4; i++) {
++        if (entry[i].page_table.type != L1_TYPE_INVALID_ENTRY) {
++            panic("Remapping valid page table.");
++        }
+     }
+ 
+     // Source
+diff --git a/usr/init/Hakefile b/usr/init/Hakefile
+index a30669d..c43a658 100644
+--- a/usr/init/Hakefile
++++ b/usr/init/Hakefile
+@@ -11,7 +11,7 @@
+ --------------------------------------------------------------------------
+ 
+ [ build application { target = "init",
+-  		      cFiles = [ "mem_alloc.c", "init.c" ],
++  		      cFiles = [ "mem_alloc.c", "init.c", "mem_serv.c" ],
+                       flounderDefs = [ "mem" ],
+                       addLinkFlags = [ "-e _start_init"],
+                       addLibraries = [ "mm", "getopt", "trace", "elf",
+diff --git a/usr/init/init.h b/usr/init/init.h
+index e3516da..a8ac70c 100644
+--- a/usr/init/init.h
++++ b/usr/init/init.h
+@@ -22,5 +22,6 @@
+ extern struct bootinfo *bi;
+ 
+ errval_t initialize_ram_alloc(void);
++errval_t initialize_mem_serv(void);
+ 
+ #endif // INIT_H
+diff --git a/usr/init/mem_serv.c b/usr/init/mem_serv.c
+index 71ed89d..67d6048 100644
+--- a/usr/init/mem_serv.c
++++ b/usr/init/mem_serv.c
+@@ -43,8 +43,8 @@ static struct slot_prealloc ram_slot_alloc;
+ 
+ static bool refilling = false;
+ 
+-errval_t memserv_alloc(struct capref *ret, uint8_t bits, genpaddr_t minbase,
+-                       genpaddr_t maxlimit)
++static errval_t memserv_alloc(struct capref *ret, uint8_t bits, genpaddr_t minbase,
++                              genpaddr_t maxlimit)
+ {
+     errval_t err;
+ 
