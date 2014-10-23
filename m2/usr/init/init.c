@@ -67,6 +67,7 @@ int main(int argc, char *argv[])
 
 
 
+
     // TODO (milestone 3) STEP 2:
     // get waitset
     // allocate lmp chan
@@ -80,5 +81,12 @@ int main(int argc, char *argv[])
     // register receive handler 
     // go into messaging main loop
 
+    //NOTE: added such that init doesn't finish before memserver can run.
+    // Can be removed later.
+
+    event_dispatch(get_default_waitset());
+
+//     for (;;) sys_yield(CPTR_NULL);
+    debug_printf ("init returned.");
     return EXIT_SUCCESS;
 }

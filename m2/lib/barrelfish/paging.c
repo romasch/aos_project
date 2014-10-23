@@ -536,7 +536,7 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
-    debug_printf ("paging_alloc: allocating %X bytes\n.", bytes);
+    debug_printf ("paging_alloc: allocating %X bytes.\n", bytes);
     assert (st = &current);
     assert ((bytes & (PAGE_SIZE-1)) == 0);
 

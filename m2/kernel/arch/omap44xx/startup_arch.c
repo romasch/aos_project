@@ -650,6 +650,12 @@ struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
     return init_dcb;
 }
 
+static void check_error (errval_t error)
+{
+    if (err_is_fail (error)) {
+        panic ("Fatal error: %u\n", error);
+    }
+}
 
 void arm_kernel_startup(void)
 {
@@ -691,11 +697,51 @@ void arm_kernel_startup(void)
 #if MILESTONE == 3
         // TODO (milestone 3): create endpoints for domains:
         // 1) selfep for each domain -- retype dcb cap into TASKCN_SLOT_SELFEP
+        errval_t error;
+        error = caps_retype (
+                ObjType_EndPoint,   // enum objtype type,
+                0,                  // size_t objbits,
+                C (init_st.taskcn), // struct capability *dest_cnode,
+                TASKCN_SLOT_SELFEP, // cslot_t dest_slot,
+                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_DISPATCHER),   // struct cte *src_cte,
+                false               // bool from_monitor);
+            );
+        check_error (error);
+
+        error = caps_retype (
+                ObjType_EndPoint,   // enum objtype type,
+                0,                  // size_t objbits,
+                C (memeater_st.taskcn),   // struct capability *dest_cnode,
+                TASKCN_SLOT_SELFEP, // cslot_t dest_slot,
+                caps_locate_slot (CNODE(memeater_st.taskcn),TASKCN_SLOT_DISPATCHER),   // struct cte *src_cte,
+                false               // bool from_monitor);
+            );
+        check_error (error);
+
         // 2) create init's receive ep -- mint init's self ep into
         //    TASKCN_SLOT_INITEP & use FIRSTEP_{OFFSET,BUFLEN} as arguments
         //    for minting.
+        error = caps_copy_to_cnode (
+                init_st.taskcn,     // struct cte *dest_cnode_cte,
+                TASKCN_SLOT_INITEP, // dest_slot,
+                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_SELFEP), // struct cte *src_cte,
+                true,               // bool mint,
+                FIRSTEP_OFFSET,     // uintptr_t param1,
+                FIRSTEP_BUFLEN      // uintptr_t param2
+            );
+        check_error (error);
+
         // 3) copy init's receive ep into all other domains'
         //    TASKCN_SLOT_INITEP.
+        error = caps_copy_to_cnode (
+                memeater_st.taskcn, //&(memeater_dcb->cspace),    // struct cte *dest_cnode_cte,
+                TASKCN_SLOT_INITEP, // dest_slot,
+                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_INITEP), // struct cte *src_cte,
+                false,              // bool mint,
+                0,                  // uintptr_t param1,
+                0                   // uintptr_t param2
+            );
+        check_error (error);
 #endif
     } else {
         debug(SUBSYS_STARTUP, "Doing non-BSP related bootup \n");
