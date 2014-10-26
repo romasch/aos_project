@@ -23,6 +23,26 @@
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
+/**
+ * A basic receive handler.
+ * This code is mostly copy-pasted from the AOS tutorial lecture slides.
+ */
+static void recv_handler(void *arg)
+{
+    errval_t err = SYS_ERR_OK;
+    struct lmp_chan* lc = (struct lmp_chan*) arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    err = lmp_chan_recv(lc, &msg, &cap);
+    if (err_is_fail(err) && lmp_err_is_transient(err)) {
+        // reregister
+        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+    }
+    debug_printf("msg buflen %u\n", msg.buf.msglen);
+    debug_printf("msg->words[0] = 0x%x\n", msg.words[0]);
+    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+}
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -69,17 +89,43 @@ int main(int argc, char *argv[])
 
 
     // TODO (milestone 3) STEP 2:
-    // get waitset
-    // allocate lmp chan
-    // init lmp chan
+    // TODO: error handling
+
+    // Get the default waitset.
+    struct waitset* default_ws = get_default_waitset ();
+
+    // Allocate an LMP channel and do basic initializaton.
+    struct lmp_chan* my_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
+    lmp_chan_init (my_channel);
+
     /* make local endpoint available -- this was minted in the kernel in a way
      * such that the buffer is directly after the dispatcher struct and the
      * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel 
      * sentinel word).
+     *
+     * NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
+     * Thus the offset of the first endpoint structure is zero.
      */
-    // allocate slot for incoming capabilites
-    // register receive handler 
-    // go into messaging main loop
+    struct lmp_endpoint* my_endpoint; // Structure to be filled in.
+    err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &my_endpoint);// TODO: error handling
+
+    // Update the channel with the newly created endpoint.
+    my_channel -> endpoint = my_endpoint;
+
+    // The channel needs to know about the (kernel-created) capability to receive objects.
+    my_channel -> local_cap = cap_initep;
+
+    // Allocate a slot for incoming capabilities.
+    err = lmp_chan_alloc_recv_slot (my_channel);// TODO: error handling
+
+    // Register a receive handler.
+    lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+
+    // Go into messaging main loop.
+    while (true) {
+        err = event_dispatch (default_ws);// TODO: error handling
+        debug_printf ("Received a message. Error code: %s\n", err_getstring (err));
+    }
 
     //NOTE: added such that init doesn't finish before memserver can run.
     // Can be removed later.

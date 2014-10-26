@@ -16,8 +16,13 @@ int main(int argc, char *argv[])
 
 //    uint32_t flags = 0;
     uint32_t flags = LMP_FLAG_SYNC | LMP_FLAG_YIELD;
+    
+    // Test sending a basic message.
     errval_t error = lmp_ep_send1 (cap_initep, flags, NULL_CAP, 42);
+    debug_printf ("Send message: %s\n", err_getstring (error));
 
+    // Test sending a capability.
+    error = lmp_ep_send1 (cap_initep, flags, cap_selfep, 43);
     debug_printf ("Send message: %s\n", err_getstring (error));
 
     // TODO STEP 5: test memory allocation using memserv
