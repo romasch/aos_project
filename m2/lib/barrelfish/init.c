@@ -117,6 +117,13 @@ static void init_recv_handler(struct aos_chan *ac, struct lmp_recv_msg *msg, str
 }
 #endif
 
+static struct lmp_chan bootstrap_channel;
+
+static void test_handler (void* arg) {
+
+    debug_printf ("Received ACK\n");
+}
+
 /** \brief Initialise libbarrelfish.
  *
  * This runs on a thread in every domain, after the dispatcher is setup but
@@ -167,12 +174,28 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }
 
     // TODO STEP 3: register ourselves with init
-    /* allocate lmp channel structure */
-    /* create local endpoint */
-    /* set remote endpoint to init's endpoint */
-    /* set receive handler */
-    /* send local ep to init */
-    /* wait for init to acknowledge receiving the endpoint */
+    errval_t error; // TODO: error handling
+
+    // Allocate lmp channel structure.
+
+    // NOTE: We can't use malloc here, because this stupid ram allocator
+    // only allows frames of one page size, and our paging code doesn't allow this.
+    struct lmp_chan* init_channel = &bootstrap_channel;
+
+    // Create local endpoint
+    // Set remote endpoint to init's endpoint
+    error = lmp_chan_accept (init_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+
+    // Set receive handler
+    // TODO: Use proper receive handler.
+    error = lmp_chan_register_recv (init_channel, get_default_waitset(), MKCLOSURE (test_handler, init_channel));
+
+    // Send local endpoint to init.
+    // TODO: Use proper protocol.
+    error = lmp_ep_send1 (cap_initep, LMP_SEND_FLAGS_DEFAULT, init_channel -> local_cap, 100);
+
+    // Wait for init to acknowledge receiving the endpoint.
+    error = event_dispatch (get_default_waitset());
 
     /* TODO STEP 5: now we should have a channel with init set up and can
      * use it for the ram allocator */
@@ -181,7 +204,6 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     // and domain spanning, so we return here
     return SYS_ERR_OK;
 }
-
 
 /**
  *  \brief Initialise libbarrelfish, while disabled.

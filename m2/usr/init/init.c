@@ -29,6 +29,7 @@ static coreid_t my_core_id;
  */
 static void recv_handler(void *arg)
 {
+    debug_printf ("Handling LMP message...\n");
     errval_t err = SYS_ERR_OK;
     struct lmp_chan* lc = (struct lmp_chan*) arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
@@ -38,8 +39,17 @@ static void recv_handler(void *arg)
         // reregister
         lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
     }
-    debug_printf("msg buflen %u\n", msg.buf.msglen);
-    debug_printf("msg->words[0] = 0x%x\n", msg.words[0]);
+
+    // TODO: devise a protocol and properly demultiplex different messages
+    if (msg.words[0] == 100) {
+        // Send a kind of echo message.
+        // NOTE: don't use LMP_SEND_FLAGS_DEFAULT, otherwise control
+        // will be transfered back to sender immediately...
+        lmp_ep_send0 (cap, 0, NULL_CAP);
+        // Delete capability and reuse slot.
+        cap_delete (cap);
+        lmp_chan_set_recv_slot (lc, cap);
+    }
     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
 }
 
@@ -85,11 +95,7 @@ int main(int argc, char *argv[])
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
     debug_printf("initialized dev memory management\n");
 
-
-
-
     // TODO (milestone 3) STEP 2:
-    // TODO: error handling
 
     // Get the default waitset.
     struct waitset* default_ws = get_default_waitset ();
@@ -124,7 +130,7 @@ int main(int argc, char *argv[])
     // Go into messaging main loop.
     while (true) {
         err = event_dispatch (default_ws);// TODO: error handling
-        debug_printf ("Received a message. Error code: %s\n", err_getstring (err));
+        debug_printf ("Handling LMP message: %s\n", err_getstring (err));
     }
 
     //NOTE: added such that init doesn't finish before memserver can run.

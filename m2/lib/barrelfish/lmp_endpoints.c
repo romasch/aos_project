@@ -190,8 +190,6 @@ static uint32_t lmp_endpoint_words_unseen(struct lmp_endpoint *ep)
  */
 void lmp_endpoints_poll_disabled(dispatcher_handle_t handle)
 {
-    debug_printf ("Got an LMP message.\n");
-
     struct dispatcher_shared_generic *disp =
         get_dispatcher_shared_generic(handle);
     struct dispatcher_generic *dp = get_dispatcher_generic(handle);

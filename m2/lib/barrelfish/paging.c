@@ -22,7 +22,7 @@
 #include <string.h>
 
 // Default page count for refill requests by slab data structures.
-#define SLAB_REFILL_PAGE_COUNT 32u
+#define SLAB_REFILL_PAGE_COUNT 8u
 
 // Predefined paging region for slot allocator.
 // This is defined by us as a workaround to a bug.
@@ -374,7 +374,9 @@ static errval_t memory_refill (struct slab_alloc* allocator)
     // This is needed as the memory is used for page table
     // management (i.e. by the page fault handler), and a double
     // page fault would be deadly.
-    paging_map_eagerly (&current, (lvaddr_t) buf, pages);
+    if (err_is_ok (err)) {
+        err = paging_map_eagerly (&current, (lvaddr_t) buf, pages);
+    }
     
     // Let the slab allocator initialize the new space.
     if (err_is_ok (err)) {
