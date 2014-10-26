@@ -30,7 +30,11 @@
 #define SLOT_REGION_SIZE FRAME_SIZE
 
 // HACK to insert newlines after eclamation marks by page fault handler.
-#define debug_printf printf("\n"); debug_printf
+//#define debug_printf printf("\n"); debug_printf
+
+//HACK turn off debugging here...
+#define debug_printf(fmt, ...)
+#define printf(fmt, ...)
 
 // A global paging state instance.
 static struct paging_state current;
@@ -377,7 +381,7 @@ static errval_t memory_refill (struct slab_alloc* allocator)
     if (err_is_ok (err)) {
         err = paging_map_eagerly (&current, (lvaddr_t) buf, pages);
     }
-    
+
     // Let the slab allocator initialize the new space.
     if (err_is_ok (err)) {
         slab_grow (allocator, buf, bytes);

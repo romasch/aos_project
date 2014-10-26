@@ -174,6 +174,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }
 
     // TODO STEP 3: register ourselves with init
+    debug_printf ("Initializing LMP system...\n");
     errval_t error; // TODO: error handling
 
     // Allocate lmp channel structure.
