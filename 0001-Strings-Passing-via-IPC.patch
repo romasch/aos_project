@@ -1,0 +1,240 @@
+From d190bb94f2b80b97ff9504b75eba71df7bdb09e5 Mon Sep 17 00:00:00 2001
+From: Zarathu5trA <prizrak-keks@mail.ru>
+Date: Tue, 28 Oct 2014 05:46:10 +0100
+Subject: [PATCH] Strings Passing via IPC
+
+---
+ m2/include/barrelfish/aos_rpc.h | 14 +++++++---
+ m2/lib/barrelfish/aos_rpc.c     | 60 ++++++++++++++++++++++++++++++++++++-----
+ m2/usr/init/init.c              | 29 ++++++++++++++++++++
+ m2/usr/memeater/memeater.c      | 16 +++++++++++
+ 4 files changed, 110 insertions(+), 9 deletions(-)
+
+diff --git a/m2/include/barrelfish/aos_rpc.h b/m2/include/barrelfish/aos_rpc.h
+index eacfa42..566b15c 100644
+--- a/m2/include/barrelfish/aos_rpc.h
++++ b/m2/include/barrelfish/aos_rpc.h
+@@ -17,21 +17,29 @@
+ 
+ #include <barrelfish/barrelfish.h>
+ 
++enum rpc_datatype {
++    UNDEFINED = 0,
++    NT_STRING = 1
++};
++
+ struct aos_rpc {
++    struct capref       target   ;
++    enum   rpc_datatype data_type;
++    
+     // TODO: add state for your implementation
+ };
+ 
+ /**
+  * \brief send a string over the given channel
+  */
+-errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string);
++errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string); // TODO:
+ 
+ /**
+  * \brief request a RAM capability with >= request_bits of size over the given
+  * channel.
+  */
+ errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
+-                             struct capref *retcap, size_t *ret_bits);
++                             struct capref *retcap, size_t *ret_bits); // TODO:
+ 
+ /**
+  * \brief get one character from the serial port
+@@ -159,6 +167,6 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path);
+  * \brief Initialize given rpc channel.
+  * TODO: you may want to change the inteface of your init function
+  */
+-errval_t aos_rpc_init(struct aos_rpc *rpc);
++errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver); // TODO:
+ 
+ #endif // _LIB_BARRELFISH_AOS_MESSAGES_H
+diff --git a/m2/lib/barrelfish/aos_rpc.c b/m2/lib/barrelfish/aos_rpc.c
+index db7f207..6285c9f 100644
+--- a/m2/lib/barrelfish/aos_rpc.c
++++ b/m2/lib/barrelfish/aos_rpc.c
+@@ -13,12 +13,47 @@
+  */
+ 
+ #include <barrelfish/aos_rpc.h>
++#include <barrelfish/lmp_chan_arch.h>
+ 
+ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
+ {
+-    // TODO: implement functionality to send a string over the given channel
+-    // and wait for a response.
+-    return SYS_ERR_OK;
++    debug_printf ("aos_rpc_send_string(%u, %s)\n", chan, string);
++    
++    errval_t error = SYS_ERR_INVARGS_SYSCALL;
++
++    if ((chan != NULL) && (chan->data_type == UNDEFINED)) {
++        bool finished = false;
++        int  indx = 0;
++
++        chan->data_type = NT_STRING;
++	
++        for (; finished == false ;) {
++            uint32_t buf[LMP_MSG_LENGTH] = {0,0,0,0,0,0,0,0,0};
++	
++            for (int i = 0; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
++	        for (int j = 0; j < 4; j ++) {
++                    buf[i] |= (uint32_t)(string[indx]) << (8 * j);
++                    
++                    if (string[indx] == '\0') {
++                        finished = true;
++                    }                
++
++                    indx++;
++                }            
++            }
++
++            error = lmp_ep_send9(chan->target, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
++            if (error != SYS_ERR_OK) {
++                finished = true;
++
++                debug_printf("aos_rpc_send_string(0x%x, %s) experienced error %u\n", chan, string, error);
++            }
++        }
++        
++        debug_printf("aos_rpc_send_string(0x%x, %s) trying to send string\n", chan, string);
++    }
++
++    return error;
+ }
+ 
+ errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
+@@ -26,6 +61,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
+ {
+     // TODO: implement functionality to request a RAM capability over the
+     // given channel and wait until it is delivered.
++    // TODO:YK
+     return SYS_ERR_OK;
+ }
+ 
+@@ -120,8 +156,20 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path)
+     return SYS_ERR_OK;
+ }
+ 
+-errval_t aos_rpc_init(struct aos_rpc *rpc)
++errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
+ {
+-    // TODO: Initialize given rpc channel
+-    return SYS_ERR_OK;
++    debug_printf ("aos_rpc_init(0x%x)\n", rpc);
++
++    errval_t error = SYS_ERR_INVARGS_SYSCALL;
++
++    if (rpc != NULL) {
++        debug_printf ("aos_rpc_init(0x%x) succed\n", rpc);
++
++        rpc->target    = receiver ;
++        rpc->data_type = UNDEFINED;
++
++	error = SYS_ERR_OK;
++    }
++
++    return error;
+ }
+diff --git a/m2/usr/init/init.c b/m2/usr/init/init.c
+index 4eab5de..0bcf678 100644
+--- a/m2/usr/init/init.c
++++ b/m2/usr/init/init.c
+@@ -23,6 +23,12 @@
+ struct bootinfo *bi;
+ static coreid_t my_core_id;
+ 
++static uint32_t example_index;
++static char*    example_str  ;
++static uint32_t example_size ;
++
++static bool global_switch = false;
++
+ /**
+  * A basic receive handler.
+  * This code is mostly copy-pasted from the AOS tutorial lecture slides.
+@@ -50,6 +56,25 @@ static void recv_handler(void *arg)
+         cap_delete (cap);
+         lmp_chan_set_recv_slot (lc, cap);
+     }
++    debug_printf ("Message received starts by: 0x%x\n", msg.words[0]);
++    if (*(char*)(&msg.words[0]) == 'T') {
++	global_switch = true;
++        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
++    }
++    if (global_switch != false) {
++        if (example_index + LMP_MSG_LENGTH * sizeof(uint32_t) > example_size) {
++            example_str = realloc(example_str, example_size * 2);
++            
++            memset(&example_str[example_size], 0, example_size);
++
++            example_size *= 2;
++        }
++
++        memcpy(&example_str[example_index], &msg.words[0], sizeof(uint32_t) * LMP_MSG_LENGTH);
++        example_index += sizeof(uint32_t) * LMP_MSG_LENGTH;
++        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
++    }
++
+     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+ }
+ 
+@@ -127,6 +152,10 @@ int main(int argc, char *argv[])
+     // Register a receive handler.
+     lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+ 
++    example_index =          0 ;
++    example_size  =        128 ; 
++    example_str   = malloc(128);
++
+     // Go into messaging main loop.
+     while (true) {
+         err = event_dispatch (default_ws);// TODO: error handling
+diff --git a/m2/usr/memeater/memeater.c b/m2/usr/memeater/memeater.c
+index ce0383e..920232b 100644
+--- a/m2/usr/memeater/memeater.c
++++ b/m2/usr/memeater/memeater.c
+@@ -3,12 +3,15 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
++#include <barrelfish/aos_rpc.h>
+ #include <barrelfish/lmp_chan.h>
+ 
+ #define BUFSIZE (128UL*1024*1024)
+ 
+ int main(int argc, char *argv[])
+ {
++    struct aos_rpc arpc;
++
+     debug_printf("memeater started\n");
+     // TODO STEP 1: connect & send msg to init using syscall
+ 
+@@ -25,6 +28,19 @@ int main(int argc, char *argv[])
+     error = lmp_ep_send1 (cap_initep, flags, cap_selfep, 43);
+     debug_printf ("Send message: %s\n", err_getstring (error));
+ 
++    error = aos_rpc_init(&arpc, cap_initep);
++    if (error != SYS_ERR_OK) {
++        debug_printf ("Error! in aos_rpc_init(0x%x) = %u", 0U, error);
++    }
++
++    debug_printf ("Send message: %s\n", "Very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long test string");
++
++    error = aos_rpc_send_string(&arpc, "Very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long test string");
++    
++    if (error != SYS_ERR_OK) {
++        debug_printf ("Error! in aos_rpc_send_string(0x%x, %s) = %u", &arpc, "Test string", error);
++    }
++
+     // TODO STEP 5: test memory allocation using memserv
+     return 0;
+ }
+-- 
+1.9.4.msysgit.1
+

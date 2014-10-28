@@ -23,6 +23,12 @@
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
+static uint32_t example_index;
+static char*    example_str  ;
+static uint32_t example_size ;
+
+static bool global_switch = false;
+
 /**
  * A basic receive handler.
  * This code is mostly copy-pasted from the AOS tutorial lecture slides.
@@ -50,6 +56,25 @@ static void recv_handler(void *arg)
         cap_delete (cap);
         lmp_chan_set_recv_slot (lc, cap);
     }
+    debug_printf ("Message received starts by: 0x%x\n", msg.words[0]);
+    if (*(char*)(&msg.words[0]) == 'T') {
+	global_switch = true;
+        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
+    }
+    if (global_switch != false) {
+        if (example_index + LMP_MSG_LENGTH * sizeof(uint32_t) > example_size) {
+            example_str = realloc(example_str, example_size * 2);
+            
+            memset(&example_str[example_size], 0, example_size);
+
+            example_size *= 2;
+        }
+
+        memcpy(&example_str[example_index], &msg.words[0], sizeof(uint32_t) * LMP_MSG_LENGTH);
+        example_index += sizeof(uint32_t) * LMP_MSG_LENGTH;
+        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
+    }
+
     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
 }
 
@@ -126,6 +151,10 @@ int main(int argc, char *argv[])
 
     // Register a receive handler.
     lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+
+    example_index =          0 ;
+    example_size  =        128 ; 
+    example_str   = malloc(128);
 
     // Go into messaging main loop.
     while (true) {

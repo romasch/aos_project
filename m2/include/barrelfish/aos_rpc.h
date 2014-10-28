@@ -17,21 +17,29 @@
 
 #include <barrelfish/barrelfish.h>
 
+enum rpc_datatype {
+    UNDEFINED = 0,
+    NT_STRING = 1
+};
+
 struct aos_rpc {
+    struct capref       target   ;
+    enum   rpc_datatype data_type;
+    
     // TODO: add state for your implementation
 };
 
 /**
  * \brief send a string over the given channel
  */
-errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string);
+errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string); // TODO:
 
 /**
  * \brief request a RAM capability with >= request_bits of size over the given
  * channel.
  */
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
-                             struct capref *retcap, size_t *ret_bits);
+                             struct capref *retcap, size_t *ret_bits); // TODO:
 
 /**
  * \brief get one character from the serial port
@@ -159,6 +167,6 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path);
  * \brief Initialize given rpc channel.
  * TODO: you may want to change the inteface of your init function
  */
-errval_t aos_rpc_init(struct aos_rpc *rpc);
+errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver); // TODO:
 
 #endif // _LIB_BARRELFISH_AOS_MESSAGES_H

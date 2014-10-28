@@ -13,12 +13,47 @@
  */
 
 #include <barrelfish/aos_rpc.h>
+#include <barrelfish/lmp_chan_arch.h>
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
-    // TODO: implement functionality to send a string over the given channel
-    // and wait for a response.
-    return SYS_ERR_OK;
+    debug_printf ("aos_rpc_send_string(%u, %s)\n", chan, string);
+    
+    errval_t error = SYS_ERR_INVARGS_SYSCALL;
+
+    if ((chan != NULL) && (chan->data_type == UNDEFINED)) {
+        bool finished = false;
+        int  indx = 0;
+
+        chan->data_type = NT_STRING;
+	
+        for (; finished == false ;) {
+            uint32_t buf[LMP_MSG_LENGTH] = {0,0,0,0,0,0,0,0,0};
+	
+            for (int i = 0; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
+	        for (int j = 0; j < 4; j ++) {
+                    buf[i] |= (uint32_t)(string[indx]) << (8 * j);
+                    
+                    if (string[indx] == '\0') {
+                        finished = true;
+                    }                
+
+                    indx++;
+                }            
+            }
+
+            error = lmp_ep_send9(chan->target, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
+            if (error != SYS_ERR_OK) {
+                finished = true;
+
+                debug_printf("aos_rpc_send_string(0x%x, %s) experienced error %u\n", chan, string, error);
+            }
+        }
+        
+        debug_printf("aos_rpc_send_string(0x%x, %s) trying to send string\n", chan, string);
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
@@ -26,6 +61,7 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *chan, size_t request_bits,
 {
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
+    // TODO:YK
     return SYS_ERR_OK;
 }
 
@@ -120,8 +156,20 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path)
     return SYS_ERR_OK;
 }
 
-errval_t aos_rpc_init(struct aos_rpc *rpc)
+errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 {
-    // TODO: Initialize given rpc channel
-    return SYS_ERR_OK;
+    debug_printf ("aos_rpc_init(0x%x)\n", rpc);
+
+    errval_t error = SYS_ERR_INVARGS_SYSCALL;
+
+    if (rpc != NULL) {
+        debug_printf ("aos_rpc_init(0x%x) succed\n", rpc);
+
+        rpc->target    = receiver ;
+        rpc->data_type = UNDEFINED;
+
+	error = SYS_ERR_OK;
+    }
+
+    return error;
 }
