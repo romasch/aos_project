@@ -57,8 +57,8 @@ static void recv_handler(void *arg)
         lmp_chan_set_recv_slot (lc, cap);
     }
     debug_printf ("Message received starts by: 0x%x\n", msg.words[0]);
-    if (*(char*)(&msg.words[0]) == 'T') {
-	global_switch = true;
+    if (*(char*)(&msg.words[0]) == 'V') {
+        global_switch = true;
         debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
     }
     if (global_switch != false) {
@@ -161,11 +161,6 @@ int main(int argc, char *argv[])
         err = event_dispatch (default_ws);// TODO: error handling
         debug_printf ("Handling LMP message: %s\n", err_getstring (err));
     }
-
-    //NOTE: added such that init doesn't finish before memserver can run.
-    // Can be removed later.
-
-    event_dispatch(get_default_waitset());
 
 //     for (;;) sys_yield(CPTR_NULL);
     debug_printf ("init returned.");

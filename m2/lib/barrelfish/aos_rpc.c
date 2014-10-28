@@ -12,13 +12,17 @@
  * ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
  */
 
+#include <stdio.h>
+
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan_arch.h>
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
-    debug_printf ("aos_rpc_send_string(%u, %s)\n", chan, string);
-    
+    // NOTE: Splitted due to size restriction in debug_printf
+    debug_printf ("aos_rpc_send_string(%u, ", chan);
+    printf ("%s)\n", string);
+
     errval_t error = SYS_ERR_INVARGS_SYSCALL;
 
     if ((chan != NULL) && (chan->data_type == UNDEFINED)) {
@@ -31,26 +35,30 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
             uint32_t buf[LMP_MSG_LENGTH] = {0,0,0,0,0,0,0,0,0};
 	
             for (int i = 0; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
-	        for (int j = 0; j < 4; j ++) {
+                for (int j = 0; j < 4; j ++) {
                     buf[i] |= (uint32_t)(string[indx]) << (8 * j);
-                    
+
                     if (string[indx] == '\0') {
                         finished = true;
-                    }                
+                        debug_printf ("last_message\n");
+                    }
 
                     indx++;
-                }            
+                }
             }
 
             error = lmp_ep_send9(chan->target, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
-            if (error != SYS_ERR_OK) {
+            debug_printf ("transferred 36 bytes: %s\n", err_getstring (error));
+
+            if (err_is_fail (error)) {
                 finished = true;
 
-                debug_printf("aos_rpc_send_string(0x%x, %s) experienced error %u\n", chan, string, error);
+                debug_printf("aos_rpc_send_string (0x%X) experienced error: %s\n", chan, err_getstring (error));
             }
         }
         
-        debug_printf("aos_rpc_send_string(0x%x, %s) trying to send string\n", chan, string);
+        debug_printf ("aos_rpc_send_string (channel 0x%X): %s\n", err_getstring (error));
+//         debug_printf("aos_rpc_send_string(0x%x, %s) trying to send string\n", chan, string);
     }
 
     return error;
