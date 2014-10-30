@@ -29,8 +29,6 @@ static uint32_t example_index;
 static char*    example_str  ;
 static uint32_t example_size ;
 
-static bool global_switch = false;
-
 /**
  * Keeps track of registered services.
  */
@@ -85,7 +83,7 @@ static void recv_handler (void *arg)
             debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
             break;
 
-        case INIT_FIND_SERVICE:
+        case INIT_FIND_SERVICE:;
             // Get the endpoint capability to a service.
             // TODO: check validity.
             uint32_t requested_service = msg.words [1];
@@ -133,33 +131,37 @@ static void recv_handler (void *arg)
             debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
             break;
 
-        default:
-            debug_printf ("Got default value\n");
+        case AOS_RPC_SEND_STRING:;
+            // TODO: maybe store the string somewhere else?
 
-            if ( *((char*) (&type)) == 'V') {
-                global_switch = true;
+            // Enlarge receive buffer if necessary.
+            uint32_t char_count = (LMP_MSG_LENGTH - 1) * sizeof (uint32_t);
+
+            if (example_index + char_count + 1 >= example_size) {
+                example_str = realloc(example_str, example_size * 2);
+                memset(&example_str[example_size], 0, example_size);
+                example_size *= 2;
             }
 
+            memcpy(&example_str[example_index], &msg.words[1], char_count);
+            example_index += char_count;
+
+            // Append a null character to safely print the string.
+            example_str [example_index] = '\0';
+            debug_printf ("Handled AOS_RPC_SEND_STRING with string: %s\n", example_str + example_index - char_count);
+            if (example_str [example_index - 1] == '\0') {
+                debug_printf ("Received last chunk. Contents: \n");
+                printf("%s\n", example_str);
+            }
+            break;
+
+        default:
+            debug_printf ("Got default value\n");
             if (! capref_is_null (cap)) {
                 cap_delete (cap);
                 lmp_chan_set_recv_slot (lc, cap);
             }
     }
-
-    if (global_switch != false) {
-        if (example_index + LMP_MSG_LENGTH * sizeof(uint32_t) > example_size) {
-            example_str = realloc(example_str, example_size * 2);
-
-            memset(&example_str[example_size], 0, example_size);
-
-            example_size *= 2;
-        }
-
-        memcpy(&example_str[example_index], &msg.words[0], sizeof(uint32_t) * LMP_MSG_LENGTH);
-        example_index += sizeof(uint32_t) * LMP_MSG_LENGTH;
-        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
-    }
-
     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
 }
 
@@ -247,7 +249,9 @@ int main(int argc, char *argv[])
     // Go into messaging main loop.
     while (true) {
         err = event_dispatch (default_ws);// TODO: error handling
-        debug_printf ("Handling LMP message: %s\n", err_getstring (err));
+        if (err_is_fail (err)) {
+            debug_printf ("Handling LMP message: %s\n", err_getstring (err));
+        }
     }
 
 //     for (;;) sys_yield(CPTR_NULL);

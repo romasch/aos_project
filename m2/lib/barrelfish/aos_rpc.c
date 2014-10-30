@@ -159,15 +159,15 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
         chan->data_type = NT_STRING;
 	
         for (; finished == false ;) {
-            uint32_t buf[LMP_MSG_LENGTH] = {0,0,0,0,0,0,0,0,0};
+            uint32_t buf[LMP_MSG_LENGTH] = {AOS_RPC_SEND_STRING,0,0,0,0,0,0,0,0};
 	
-            for (int i = 0; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
+            for (int i = 1; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
                 for (int j = 0; j < 4; j ++) {
                     buf[i] |= (uint32_t)(string[indx]) << (8 * j);
 
-                    if (string[indx] == '\0') {
+                    if (string[indx] == '\0' && !finished) {
                         finished = true;
-                        debug_printf ("last_message\n");
+                        debug_printf_quiet ("last_message\n");
                     }
 
                     indx++;
@@ -175,19 +175,17 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
             }
 
             error = lmp_ep_send9(chan->target, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
-            debug_printf ("transferred 36 bytes: %s\n", err_getstring (error));
+            debug_printf_quiet ("transferred 32 bytes: %s\n", err_getstring (error));
 
             if (err_is_fail (error)) {
                 finished = true;
 
-                debug_printf("aos_rpc_send_string (0x%X) experienced error: %s\n", chan, err_getstring (error));
+                print_error(error, "aos_rpc_send_string (0x%X) experienced error: %s\n", chan, err_getstring (error));
             }
         }
         
-        debug_printf ("aos_rpc_send_string (channel 0x%X): %s\n", err_getstring (error));
-//         debug_printf("aos_rpc_send_string(0x%x, %s) trying to send string\n", chan, string);
+        print_error (error, "aos_rpc_send_string (channel 0x%X): %s\n", err_getstring (error));
     }
-
     return error;
 }
 
