@@ -20,6 +20,8 @@
 #include <barrelfish/debug.h>
 #include <barrelfish/lmp_chan.h>
 
+#include <barrelfish/aos_rpc.h>
+
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
@@ -30,41 +32,124 @@ static uint32_t example_size ;
 static bool global_switch = false;
 
 /**
- * A basic receive handler.
- * This code is mostly copy-pasted from the AOS tutorial lecture slides.
+ * Keeps track of registered services.
  */
-static void recv_handler(void *arg)
+static struct capref services [aos_service_guard];
+
+/**
+ * Initialize the service lookup facility.
+ */
+static void init_services (void) {
+
+    for (int i=0; i<aos_service_guard; i++) {
+        services [i] = NULL_CAP;
+    }
+
+    // Currently we're using init as the ram server.
+    services [aos_service_ram] = cap_initep;
+}
+
+/**
+ * A receive handler for init.
+ */
+static void recv_handler (void *arg)
 {
-    debug_printf ("Handling LMP message...\n");
+//    debug_printf ("Handling LMP message...\n");
     errval_t err = SYS_ERR_OK;
     struct lmp_chan* lc = (struct lmp_chan*) arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
     struct capref cap;
+
+    // Retrieve capability and arguments.
     err = lmp_chan_recv(lc, &msg, &cap);
+
     if (err_is_fail(err) && lmp_err_is_transient(err)) {
         // reregister
         lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
     }
 
-    // TODO: devise a protocol and properly demultiplex different messages
-    if (msg.words[0] == 100) {
-        // Send a kind of echo message.
-        // NOTE: don't use LMP_SEND_FLAGS_DEFAULT, otherwise control
-        // will be transfered back to sender immediately...
-        lmp_ep_send0 (cap, 0, NULL_CAP);
-        // Delete capability and reuse slot.
-        cap_delete (cap);
-        lmp_chan_set_recv_slot (lc, cap);
+    uint32_t type = msg.words [0];
+
+    switch (type)
+    {
+        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
+        // otherwise control will be transfered back to sender immediately...
+
+        case AOS_PING:
+            // Send a response to the ping request.
+            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
+
+            // Delete capability and reuse slot.
+            err = cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
+            break;
+
+        case INIT_FIND_SERVICE:
+            // Get the endpoint capability to a service.
+            // TODO: check validity.
+            uint32_t requested_service = msg.words [1];
+
+            // debug_printf ("Requested service: %u\n", requested_service);
+
+            // TODO: Find out why lookup for services[0] == cap_initep fails.
+            lmp_ep_send0 (cap, 0, services [requested_service]);
+
+            // Delete capability and reuse slot.
+            cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            debug_printf ("Handled INIT_FIND_SERVICE\n");
+            break;
+
+        case AOS_RPC_CONNECT:;
+            // Create a new channel.
+            struct lmp_chan* new_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
+            lmp_chan_init (new_channel);
+
+            // Set up channel for receiving.
+            err = lmp_chan_accept (new_channel, DEFAULT_LMP_BUF_WORDS, cap);
+            err = lmp_chan_alloc_recv_slot (new_channel);
+
+            // Register a receive handler for the new channel.
+            // TODO: maybe also use a different receive handler for connected clients.
+            err = lmp_chan_register_recv (new_channel, get_default_waitset(), MKCLOSURE (recv_handler, new_channel));
+
+            // Need to allocate a new slot for the main channel.
+            err = lmp_chan_alloc_recv_slot (lc);
+
+            err = lmp_chan_send2 (new_channel, 0, new_channel -> local_cap, 0, msg.words[1]);
+            debug_printf ("Handled AOS_RPC_CONNECT\n");
+            break;
+        case AOS_RPC_GET_RAM_CAP:;
+            size_t bits = msg.words [1];
+            struct capref ram;
+            errval_t error = ram_alloc (&ram, bits);
+
+            lmp_chan_send2 (lc, 0, ram, error, bits);
+
+            //TODO: do we need to destroy ram capability here?
+//          error = cap_destroy (ram);
+
+            debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
+            break;
+
+        default:
+            debug_printf ("Got default value\n");
+
+            if ( *((char*) (&type)) == 'V') {
+                global_switch = true;
+            }
+
+            if (! capref_is_null (cap)) {
+                cap_delete (cap);
+                lmp_chan_set_recv_slot (lc, cap);
+            }
     }
-    debug_printf ("Message received starts by: 0x%x\n", msg.words[0]);
-    if (*(char*)(&msg.words[0]) == 'V') {
-        global_switch = true;
-        debug_printf ("String received: %s\n", (char*)(&msg.words[0]));
-    }
+
     if (global_switch != false) {
         if (example_index + LMP_MSG_LENGTH * sizeof(uint32_t) > example_size) {
             example_str = realloc(example_str, example_size * 2);
-            
+
             memset(&example_str[example_size], 0, example_size);
 
             example_size *= 2;
@@ -121,6 +206,9 @@ int main(int argc, char *argv[])
     debug_printf("initialized dev memory management\n");
 
     // TODO (milestone 3) STEP 2:
+
+    // Set up the basic service registration mechanism.
+    init_services ();
 
     // Get the default waitset.
     struct waitset* default_ws = get_default_waitset ();

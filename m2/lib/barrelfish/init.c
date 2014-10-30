@@ -30,6 +30,9 @@
 #include "threads_priv.h"
 #include "init.h"
 
+#include <barrelfish/aos_rpc.h>
+// #include <barrelfish/lmp_chan.h>
+
 /// Are we the init domain (and thus need to take some special paths)?
 static bool init_domain;
 
@@ -117,11 +120,26 @@ static void init_recv_handler(struct aos_chan *ac, struct lmp_recv_msg *msg, str
 }
 #endif
 
-static struct lmp_chan bootstrap_channel;
+//TODO: This global variable should be better encapsulated...
+// Currently it's also used in aos_rpc.c
+struct lmp_chan bootstrap_channel;
+struct aos_rpc ram_server_connection;
 
 static void test_handler (void* arg) {
 
-    debug_printf ("Received ACK\n");
+    struct lmp_chan* channel = arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t error = lmp_chan_recv(channel, &msg, &cap);
+    debug_printf ("Received ACK: %s\n", err_getstring (error));
+}
+
+static errval_t __attribute__((unused))  ram_alloc_ipc (struct capref *ret, uint8_t size_bits, uint64_t minbase, uint64_t maxlimit)
+{
+    size_t ret_bits; // TODO: handle this...
+    errval_t error = aos_rpc_get_ram_cap (&ram_server_connection, size_bits, ret, &ret_bits);
+    debug_printf ("Allocating %u bits: %s\n", size_bits, err_getstring (error));
+    return error;
 }
 
 /** \brief Initialise libbarrelfish.
@@ -193,13 +211,24 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
     // Send local endpoint to init.
     // TODO: Use proper protocol.
-    error = lmp_ep_send1 (cap_initep, LMP_SEND_FLAGS_DEFAULT, init_channel -> local_cap, 100);
+    error = lmp_ep_send1 (cap_initep, LMP_SEND_FLAGS_DEFAULT, init_channel -> local_cap, AOS_PING);
 
     // Wait for init to acknowledge receiving the endpoint.
     error = event_dispatch (get_default_waitset());
 
-    /* TODO STEP 5: now we should have a channel with init set up and can
-     * use it for the ram allocator */
+    // STEP 5: now we should have a channel with init set up and can
+    // use it for the ram allocator
+
+    struct capref ram_server_endpoint = NULL_CAP;
+
+    // TODO: find out why aos_find_service doesn't work.
+//     error = aos_find_service (aos_service_ram, &ram_server_endpoint);
+    ram_server_endpoint = cap_initep;
+
+    error = aos_rpc_init (&ram_server_connection, ram_server_endpoint);
+
+    error = ram_alloc_set (ram_alloc_ipc);
+
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here

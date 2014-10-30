@@ -16,13 +16,108 @@
 #define _LIB_BARRELFISH_AOS_MESSAGES_H
 
 #include <barrelfish/barrelfish.h>
+#include <barrelfish/lmp_chan.h>
+
+// Some predefined services
+enum aos_service {
+    aos_service_ram = 0,
+    aos_service_serial,
+    //...
+
+    // NOTE: Must be last!
+    aos_service_guard
+};
+
+// Basic protocol:
+// The first argument is the type of message.
+// If there's a reply, the first argument is an errval_t. // TODO: this is currently not always implemented.
+
+
+/**
+ * Do a small exchange for testing purposes.
+ *
+ * Type: Synchronous
+ * Target: any
+ * Send Args: An arbitrary value
+ * Send Capability: Endpoint of current processor (for response)
+ * Receive Args: Arbitrary value (same as send)
+ * Receive Capability: -
+ */
+#define AOS_PING 100
+
+/**
+ * Register a service provided by the current domain.
+ *
+ * Type: Synchronous
+ * Target: init
+ * Send Args: Service identifier, endpoint capability of current processor.
+ * Receive Args: no response
+ */
+#define INIT_REGISTER_SERVICE 1
+
+/**
+ * Find endpoint capability of a service.
+ *
+ * Type: Synchronous
+ * Target: init
+ * Send Args: service identifier
+ * Send Capability: endpoint where to send reply to
+ * Receive Args: error code //TODO
+ * Receive Capability: endpoint capability of specified service
+ */
+#define INIT_FIND_SERVICE 2
+
+/**
+ * Connect to a domain
+ *
+ * Type: Synchronous
+ * Target: public endpoint of a service provider
+ * Send Args: -
+ * Send Capability: endpoint of connection initiator
+ * Receive Args: error code // TODO
+ * Receive Capability: (private) endpoint of service provider
+ */
+#define AOS_RPC_CONNECT 3
+
+/**
+ * Get a RAM capability.
+ *
+ * Type: Synchronous
+ * Target: private endpoint of RAM server
+ * Send Args: Requested size in bits
+ * Send Capability: -
+ * Receive Args: error value, actual size in bits
+ * Receive Capability: RAM cap
+ */
+#define AOS_RPC_GET_RAM_CAP 4
+
+/**
+ * Send a (partial) string.
+ *
+ * Type: Synchronous // TODO: might be a candidate for asynchronous communication.
+ * Target: any
+ * Send Args: Each remaining arg filled with characters.
+ * Send Capability: -
+ * Receive Args: no reply
+ * Receive Capability: -
+ */
+#define AOS_RPC_SEND_STRING 5
 
 enum rpc_datatype {
     UNDEFINED = 0,
     NT_STRING = 1
 };
 
+enum rpc_state {
+    RPC_STATE_DISCONNECTED = 0,
+    RPC_STATE_READY,
+    RPC_STATE_WAITING
+};
+
 struct aos_rpc {
+    struct lmp_chan channel;
+    enum rpc_state state; // not sure if needed...
+
     struct capref       target   ;
     enum   rpc_datatype data_type;
     
@@ -168,5 +263,21 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path);
  * TODO: you may want to change the inteface of your init function
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver); // TODO:
+
+/**
+ * \brief Find the endpoint for the domain which provides the specified service.
+ * This request gets handled by init.
+ */
+errval_t aos_find_service (uint32_t service, struct capref* endpoint);
+
+/**
+ * \brief Register a service of the current process with init.
+ */
+errval_t aos_register_service (uint32_t service, struct capref endpoint);
+
+/**
+ * Ping a domain.
+ */
+errval_t aos_ping (struct lmp_chan* channel, uint32_t value);
 
 #endif // _LIB_BARRELFISH_AOS_MESSAGES_H
