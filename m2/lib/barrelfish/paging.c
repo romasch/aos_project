@@ -32,12 +32,40 @@
 // TODO Which size?? Experiments show that it needs about 32 pages for an 48MB array.
 #define SLOT_REGION_SIZE FRAME_SIZE
 
-// HACK to insert newlines after eclamation marks by page fault handler.
-// #define debug_printf printf("\n"); debug_printf
 
-// HACK turn off debugging here...
-// #define debug_printf(fmt, ...)
-// #define printf(fmt, ...)
+// Enable or disable debugging output:
+// #define PRINT_STACK
+// #define VERBOSE
+// #define DEBUG_PRINT_SHORT
+
+#ifdef DEBUG_PRINT_SHORT
+static inline void debug_print_short (char* msg)
+{
+    char buf [5] = {0,0,0,0,0};
+    for (int i=0; i<5 || msg[i] == '\0'; i++) {
+        buf [i] = msg [i];
+    }
+    sys_print (buf, 5);
+}
+#else
+static inline void debug_print_short (char* msg) {}
+#endif
+
+#ifdef PRINT_STACK
+    #define PRINT_ENTRY debug_printf("%s...\n", __func__)
+    #define PRINT_EXIT(error) debug_printf ("%s: %s\n", __func__, err_getstring (error))
+    #define PRINT_EXIT_VOID debug_printf ("%s terminated\n", __func__)
+#else
+    #define PRINT_ENTRY
+    #define PRINT_EXIT(error)
+    #define PRINT_EXIT_VOID
+#endif
+
+#ifndef VERBOSE
+    #define debug_printf_quiet(x, ...)
+#else
+    #define debug_printf_quiet debug_printf
+#endif
 
 // A global paging state instance.
 static struct paging_state current;
@@ -81,10 +109,8 @@ static void my_exception_handler (enum exception_type type, int subtype,
                                      arch_registers_fpu_state_t *fpuregs) 
 {
     // Print a small message, otherwise terminal fills up and computation takes ages.
-    printf ("?");
-    fflush (stdout);
-//     debug_printf ("Hello Exception World!\n");
-//     debug_printf ("Got type %u, subtype %u, addr %X\n", type, subtype, addr);
+    debug_print_short ("?");
+//     debug_printf ("Exception type %u, subtype %u, addr %X\n", type, subtype, addr);
 
     lvaddr_t vaddr = (lvaddr_t) addr;
 
@@ -95,8 +121,9 @@ static void my_exception_handler (enum exception_type type, int subtype,
     {
         errval_t err = paging_handle_pagefault (&current, (lvaddr_t) addr);
         if (err_is_ok (err)) {
-            printf ("!");
-            fflush (stdout);
+            debug_print_short ("!");
+        } else {
+            debug_print_short ("XXXXX");
         }
     } else {
         debug_printf ("Invalid address!\n");
@@ -127,6 +154,7 @@ static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t ad
         if (state->flist_tail == NULL // => No frame available yet.
                 || state->flist_tail->next_free_slot >= FRAME_SLOTS) // => Frame is full.
         {
+            debug_print_short ("..+..");
 
             // Unfortunately we need to allocate a frame.
             // Get a new frame of default size FRAME_SIZE.
@@ -158,7 +186,7 @@ static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t ad
                     state->flist_head = node;
                     state->flist_tail = node;
                 }
-                debug_printf ("Allocated a new frame of size 0x%X\n", FRAME_SIZE);
+                debug_printf_quiet ("Allocated a new frame of size 0x%X\n", FRAME_SIZE);
             } else {
                 // Allocation was not successful.
                 cap_destroy (new_frame);
@@ -225,7 +253,8 @@ static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t ad
  */
 static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_index)
 {
-    debug_printf ("paging_allocate_ptable...\n");
+    PRINT_ENTRY;
+    debug_print_short ("..*..");
     assert (state -> ptables [l1_index] == NULL);
 
     errval_t error = SYS_ERR_OK;
@@ -281,7 +310,7 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
             state -> ptables [l1_index] = new_ptable;
         }
     }
-    debug_printf ("paging_allocate_ptable: %s!\n", err_getstring (error));
+    PRINT_EXIT (error);
     return error;
 }
 
@@ -294,7 +323,7 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
  */
 static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_addr, uint32_t page_count)
 {
-    debug_printf ("paging_map_eagerly...\n");
+    PRINT_ENTRY;
 
     // Enforce page alignment restriction.
     assert ((base_addr & (PAGE_SIZE-1)) == 0);
@@ -331,7 +360,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
             uint32_t free_slots = ARM_L2_USER_ENTRIES - l2_index;
 
             if (free_slots <= remaining_pages) {
-                debug_printf ("paging_map_eagerly: page region spans over multiple ptables\n");
+                debug_printf_quiet ("paging_map_eagerly: page region spans over multiple ptables\n");
                 // ouch, need to allocate another page table...
                 // Map at least part of it.
                 struct capref copied_frame;
@@ -360,7 +389,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
         cap_destroy (new_frame);
     }
 
-    debug_printf ("paging_map_eagerly: %s\n", err_getstring(error));
+    PRINT_EXIT (error);
     return error;
 }
 
@@ -370,7 +399,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
  */
 static errval_t memory_refill (struct slab_alloc* allocator)
 {
-    debug_printf ("memory_refill...\n");
+    PRINT_ENTRY;
 
     // Initialize constants.
     size_t pages = SLAB_REFILL_PAGE_COUNT;
@@ -388,12 +417,11 @@ static errval_t memory_refill (struct slab_alloc* allocator)
         err = paging_map_eagerly (&current, (lvaddr_t) buf, pages);
     }
 
-    // Let the slab allocator initialize the new space.
     if (err_is_ok (err)) {
         slab_grow (allocator, buf, bytes);
     }
 
-    debug_printf ("memory_refill: %s\n", err_getstring(err));
+    PRINT_EXIT (err);
     return err;
 }
 
@@ -402,7 +430,7 @@ static errval_t memory_refill (struct slab_alloc* allocator)
 */
 errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
-    debug_printf("paging_init_state, start %X\n", start_vaddr);
+    PRINT_ENTRY;
 
     // Make sure we have zeroed out memory.
     memset (st, 0, sizeof (struct paging_state));
@@ -417,37 +445,44 @@ errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struc
 
     slab_init (&(st->exception_stack_mem), EXCEPTION_STACK_SIZE, memory_refill);
 
-    return SYS_ERR_OK;
+    errval_t error = SYS_ERR_OK;
+    PRINT_EXIT (error);
+    return error;
 }
+
 
 errval_t paging_init(void)
 {
-    debug_printf("paging_init\n");
+    PRINT_ENTRY;
+
     // Initialize self-paging handler.
     // TIP: use thread_set_exception_handler() to setup a page fault handler
-    thread_set_exception_handler (&my_exception_handler, NULL, e_stack, e_stack_top, NULL, NULL);
+    errval_t error = thread_set_exception_handler (&my_exception_handler, NULL, e_stack, e_stack_top, NULL, NULL);
 
     // TIP: Think about the fact that later on, you'll have to make sure that
     // you can handle page faults in any thread of a domain.
-    // TODO: what exactly does this mean?
+    // TODO: Do we need mutexes? At the moment all state is accessed on a single core and only when the thread yields the CPU.
 
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
 
-    //TODO WTF is: struct capref pdir
-    struct capref pdir;
-
     //TODO check if VADDR_OFFSET is ok as the start of our heap.
-    paging_init_state (&current, VADDR_OFFSET, pdir);
+    //TODO: remove struct capref pdir, or store lvl1 page table.
+    paging_init_state (&current, VADDR_OFFSET, NULL_CAP);
 
     set_current_paging_state(&current);
-    return SYS_ERR_OK;
+
+    PRINT_EXIT (error);
+    return error;
 }
 
+
+/**
+ * \brief Set up exception handler and exception stack for thread t.
+ */
 void paging_init_onthread(struct thread *t)
 {
-    // Setup exception handler and exception stack for thread `t'.
-    debug_printf ("called\n");
+    PRINT_ENTRY;
 
     void* new_stack = slab_alloc ( &(current.exception_stack_mem));
     assert (new_stack != NULL);
@@ -455,6 +490,8 @@ void paging_init_onthread(struct thread *t)
     t -> exception_handler = my_exception_handler;
     t -> exception_stack = new_stack;
     t -> exception_stack_top = new_stack + EXCEPTION_STACK_SIZE;
+
+    PRINT_EXIT_VOID;
 }
 
 /**
@@ -464,24 +501,29 @@ void paging_init_onthread(struct thread *t)
  */
 errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, size_t size)
 {
-    debug_printf ("paging_region_init: %X\n", pr);
+    PRINT_ENTRY;
 
     // Align requested size to page boundary.
     int aligned_size = ((size-1) & ~(PAGE_SIZE-1)) + PAGE_SIZE;
 
     void *base;
-    errval_t err = paging_alloc(st, &base, aligned_size);
+    errval_t error = paging_alloc(st, &base, aligned_size);
 
-    if (err_is_fail(err)) {
-        debug_printf("paging_region_init: paging_alloc failed\n");
-        return err_push(err, LIB_ERR_VSPACE_MMU_AWARE_INIT);
+    if (err_is_fail(error)) {
+
+        error =  err_push (error, LIB_ERR_VSPACE_MMU_AWARE_INIT);
+        debug_printf ("paging_region_init: paging_alloc failed\n");
+
+    } else {
+
+        pr->base_addr    = (lvaddr_t)base;
+        pr->current_addr = pr->base_addr;
+        pr->region_size  = aligned_size;
+        // TODO: maybe add paging regions to paging state?
     }
 
-    pr->base_addr    = (lvaddr_t)base;
-    pr->current_addr = pr->base_addr;
-    pr->region_size  = aligned_size;
-    // TODO: maybe add paging regions to paging state?
-    return SYS_ERR_OK;
+    PRINT_EXIT (error);
+    return error;
 }
 
 /**
@@ -492,15 +534,16 @@ errval_t paging_region_init(struct paging_state *st, struct paging_region *pr, s
 errval_t paging_region_map(struct paging_region *pr, size_t req_size,
                            void **retbuf, size_t *ret_size)
 {
-    debug_printf ("paging_region_map: %X, addr %X, current %X, req %u\n"
-        , pr
-        , pr->base_addr
-        , pr -> current_addr
-        , req_size);
+    PRINT_ENTRY;
 
     // BUG: we may get a region that is not initialized
     // from multi_alloc() (multi_slot_alloc.c, line 106)!
     if (pr -> base_addr == 0) {
+        debug_printf ("paging_region_map: Got NULL struct! struct %X, base_addr %X, current %X, req %u\n",
+                      pr,
+                      pr->base_addr,
+                      pr -> current_addr,
+                      req_size);
         paging_region_init (&current, pr, SLOT_REGION_SIZE);
     }
 
@@ -520,8 +563,7 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
     } else if (remaining > 0) {
 
         pages_to_map = remaining / PAGE_SIZE;
-        debug_printf("exhausted paging region, "
-                "expect badness on next allocation\n");
+        debug_printf("exhausted paging region, expect badness on next allocation\n");
     } else {
         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
     }
@@ -534,7 +576,7 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
         pr->current_addr += *ret_size;
     }
 
-    debug_printf ("paging_region_map: %s\n", err_getstring (error));
+    PRINT_EXIT (error);
     return error;
 }
 
@@ -557,7 +599,7 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
-    debug_printf ("paging_alloc: allocating %X bytes.\n", bytes);
+    debug_printf_quiet ("paging_alloc: allocating %X bytes.\n", bytes);
     assert (st = &current);
     assert ((bytes & (PAGE_SIZE-1)) == 0);
 
@@ -574,14 +616,14 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
                                size_t bytes, struct capref frame,
                                int flags, void *arg1, void *arg2)
 {
-    debug_printf ("paging_map_frame_attr...\n");
+    PRINT_ENTRY;
     errval_t err = paging_alloc(st, buf, bytes);
     if (err_is_fail(err)) {
         return err;
     }
     err = paging_map_fixed_attr(st, (lvaddr_t)(*buf), frame, bytes, flags);
 
-    debug_printf ("paging_map_frame_attr: %s\n", err_getstring (err));
+    PRINT_EXIT (err);
     return err;
 }
 
@@ -597,7 +639,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
     // from handout: you will need this functionality in later assignments. Try to
     // keep this in mind when designing your self-paging system.
 
-    debug_printf ("paging_map_fixed_addr...\n");
+    PRINT_ENTRY;
 
     // Enforce page alignment restriction.
     assert ((vaddr & (PAGE_SIZE-1)) == 0);
@@ -633,7 +675,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
             uint32_t free_slots = ARM_L2_USER_ENTRIES - l2_index;
 
             if (free_slots <= remaining_pages) {
-                debug_printf ("paging_map_eagerly: page region spans over multiple ptables\n");
+                debug_printf_quiet ("paging_map_fixed_attr: page region spans over multiple ptables\n");
                 // ouch, need to allocate another page table...
                 // Map at least part of it.
                 struct capref copied_frame;
@@ -662,7 +704,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
 //         cap_destroy (new_frame);
 //     }
 
-    debug_printf ("paging_map_fixed_addr: %s\n", err_getstring(error));
+    PRINT_EXIT (error);
     return error;
 }
 
