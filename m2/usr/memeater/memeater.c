@@ -6,8 +6,8 @@
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan.h>
 
-#define BUFSIZE (128UL*1024*1024)
-//#define BUFSIZE (48UL*1024*1024)
+// #define BUFSIZE (128UL*1024*1024)
+#define BUFSIZE (4UL*1024*1024)
 
 extern struct lmp_chan bootstrap_channel;
 

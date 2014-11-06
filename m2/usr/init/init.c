@@ -165,6 +165,24 @@ static void recv_handler (void *arg)
     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
 }
 
+static int test_thread (void* arg)
+{
+    // A small test for our separate page fault handler.
+    debug_printf ("test_thread: new thread created...\n");
+    size_t bufsize = 4*1024*1024;
+    char* buf = malloc (bufsize);
+    debug_printf ("test_thread: buffer allocated.\n");
+    for (int i=0; i<bufsize; i++) {
+        buf [i] = i%256;
+    }
+    debug_printf ("test_thread: buffer filled.\n");
+
+    free (buf);
+
+    debug_printf ("test_thread: end of thread reached.\n");
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -246,6 +264,9 @@ int main(int argc, char *argv[])
     example_size  =        128 ; 
     example_str   = malloc(128);
 
+    // Test thread creation.
+    thread_create (test_thread, NULL);
+
     // Go into messaging main loop.
     while (true) {
         err = event_dispatch (default_ws);// TODO: error handling
@@ -257,4 +278,5 @@ int main(int argc, char *argv[])
 //     for (;;) sys_yield(CPTR_NULL);
     debug_printf ("init returned.");
     return EXIT_SUCCESS;
+
 }

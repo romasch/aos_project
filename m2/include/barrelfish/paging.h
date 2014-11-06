@@ -53,6 +53,9 @@ typedef int paging_flags_t;
 #define FRAME_SIZE (1024u*1024u)
 #define PAGE_SIZE (4*1024)
 #define FRAME_SLOTS 256u
+
+#define EXCEPTION_STACK_SIZE (16u*1024u)
+
 struct frame_list;
 
 // We only need to store if the page has been mapped at some point.
@@ -117,6 +120,13 @@ struct paging_state {
     struct frame_list* flist_tail;
     // Simple memory manager for frame list.
     struct slab_alloc frame_mem;
+
+    // Exception stack management:
+
+    // Exception stacks for user-level threads
+    // (other than the root thread) are managed
+    // by a slab allocator.
+    struct slab_alloc exception_stack_mem;
 };
 
 struct thread;

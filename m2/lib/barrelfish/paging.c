@@ -21,6 +21,9 @@
 #include <stdio.h>
 #include <string.h>
 
+// Flags for newly mapped pages.
+#define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
+
 // Default page count for refill requests by slab data structures.
 #define SLAB_REFILL_PAGE_COUNT 8u
 
@@ -30,14 +33,18 @@
 #define SLOT_REGION_SIZE FRAME_SIZE
 
 // HACK to insert newlines after eclamation marks by page fault handler.
-//#define debug_printf printf("\n"); debug_printf
+// #define debug_printf printf("\n"); debug_printf
 
-//HACK turn off debugging here...
-#define debug_printf(fmt, ...)
-#define printf(fmt, ...)
+// HACK turn off debugging here...
+// #define debug_printf(fmt, ...)
+// #define printf(fmt, ...)
 
 // A global paging state instance.
 static struct paging_state current;
+
+// The exception stack for the first user-level thread.
+static char e_stack[EXCEPTION_STACK_SIZE];
+static char* e_stack_top = e_stack + EXCEPTION_STACK_SIZE;
 
 // Forward declarations.
 static errval_t paging_handle_pagefault (struct paging_state* state, lvaddr_t addr);
@@ -66,11 +73,6 @@ static errval_t arml2_alloc(struct capref *ret)
     return SYS_ERR_OK;
 }
 
-#define S_SIZE 2*8192
-#define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
-static char e_stack[S_SIZE];
-static char* e_stack_top = e_stack + S_SIZE;
-
 /**
  * Exception handler for barrelfish.
  */
@@ -79,7 +81,7 @@ static void my_exception_handler (enum exception_type type, int subtype,
                                      arch_registers_fpu_state_t *fpuregs) 
 {
     // Print a small message, otherwise terminal fills up and computation takes ages.
-    printf ("!");
+    printf ("?");
     fflush (stdout);
 //     debug_printf ("Hello Exception World!\n");
 //     debug_printf ("Got type %u, subtype %u, addr %X\n", type, subtype, addr);
@@ -91,7 +93,11 @@ static void my_exception_handler (enum exception_type type, int subtype,
         && current.heap_begin <= vaddr 
         && vaddr < current.heap_end )
     {
-        paging_handle_pagefault (&current, (lvaddr_t) addr);
+        errval_t err = paging_handle_pagefault (&current, (lvaddr_t) addr);
+        if (err_is_ok (err)) {
+            printf ("!");
+            fflush (stdout);
+        }
     } else {
         debug_printf ("Invalid address!\n");
         abort();
@@ -409,6 +415,8 @@ errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struc
     slab_init (&(st->ptable_mem), sizeof (struct ptable_lvl2), memory_refill);
     slab_init (&(st->frame_mem), sizeof (struct frame_list), memory_refill);
 
+    slab_init (&(st->exception_stack_mem), EXCEPTION_STACK_SIZE, memory_refill);
+
     return SYS_ERR_OK;
 }
 
@@ -438,8 +446,15 @@ errval_t paging_init(void)
 
 void paging_init_onthread(struct thread *t)
 {
-    // TODO: setup exception handler for thread `t'.
+    // Setup exception handler and exception stack for thread `t'.
     debug_printf ("called\n");
+
+    void* new_stack = slab_alloc ( &(current.exception_stack_mem));
+    assert (new_stack != NULL);
+
+    t -> exception_handler = my_exception_handler;
+    t -> exception_stack = new_stack;
+    t -> exception_stack_top = new_stack + EXCEPTION_STACK_SIZE;
 }
 
 /**
@@ -559,23 +574,96 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
                                size_t bytes, struct capref frame,
                                int flags, void *arg1, void *arg2)
 {
+    debug_printf ("paging_map_frame_attr...\n");
     errval_t err = paging_alloc(st, buf, bytes);
     if (err_is_fail(err)) {
         return err;
     }
-    return paging_map_fixed_attr(st, (lvaddr_t)(*buf), frame, bytes, flags);
+    err = paging_map_fixed_attr(st, (lvaddr_t)(*buf), frame, bytes, flags);
+
+    debug_printf ("paging_map_frame_attr: %s\n", err_getstring (err));
+    return err;
 }
 
 
 /**
  * \brief map a user provided frame at user provided VA.
  */
-errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
+errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
         struct capref frame, size_t bytes, int flags)
 {
-    // TODO: you will need this functionality in later assignments. Try to
+    // TODO: Check if we can merge paging_map_eagerly with this function.
+
+    // from handout: you will need this functionality in later assignments. Try to
     // keep this in mind when designing your self-paging system.
-    return SYS_ERR_OK;
+
+    debug_printf ("paging_map_fixed_addr...\n");
+
+    // Enforce page alignment restriction.
+    assert ((vaddr & (PAGE_SIZE-1)) == 0);
+    assert (bytes % PAGE_SIZE == 0);
+
+    // Enforce that frame size >= bytes.
+    // TODO
+
+    errval_t error = SYS_ERR_OK;
+
+    uint32_t page_count = bytes / PAGE_SIZE;
+
+    uint32_t remaining_pages = page_count;
+    lvaddr_t mapped_addr = vaddr;
+
+    while (remaining_pages > 0 && err_is_ok (error)) {
+
+        // Now map all pages to the correct second-level page table.
+        int l1_index = ARM_L1_USER_OFFSET (mapped_addr);
+        int l2_index = ARM_L2_USER_OFFSET (mapped_addr);
+
+        // Allocate a second-level page table if necessary.
+        if ( ! state->ptables [l1_index] ) {
+            error = paging_allocate_ptable (state, l1_index);
+        }
+
+        if (err_is_ok (error)) {
+
+            // Get the capability for the second-level page table.
+            struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
+
+            // Figure out how many page table entries are still free.
+            uint32_t free_slots = ARM_L2_USER_ENTRIES - l2_index;
+
+            if (free_slots <= remaining_pages) {
+                debug_printf ("paging_map_eagerly: page region spans over multiple ptables\n");
+                // ouch, need to allocate another page table...
+                // Map at least part of it.
+                struct capref copied_frame;
+                slot_alloc (&copied_frame);
+                error = cap_copy (copied_frame, frame);
+
+                if (err_is_ok (error)) {
+                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, 0, free_slots);
+                    remaining_pages -= free_slots;
+                    mapped_addr += free_slots * PAGE_SIZE;
+                } else {
+                    cap_destroy (copied_frame);
+                }
+            } else {
+                // Everything fits into the current page table.
+                // Map it to the specified addresses.
+                error = vnode_map (cap_l2, frame, l2_index, FLAGS, 0, remaining_pages);
+                remaining_pages = 0;
+            }
+        }
+    }
+
+//     if (err_is_fail (error)) {
+//         // Mapping or allocation failed!
+//         // Return frame cap and report error.
+//         cap_destroy (new_frame);
+//     }
+
+    debug_printf ("paging_map_fixed_addr: %s\n", err_getstring(error));
+    return error;
 }
 
 /**
