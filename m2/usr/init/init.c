@@ -22,6 +22,10 @@
 
 #include <barrelfish/aos_rpc.h>
 
+// From Milestone 0...
+#define UART_BASE 0x48020000
+#define UART_SIZE 0x1000
+
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
@@ -33,6 +37,68 @@ static uint32_t example_size ;
  * Keeps track of registered services.
  */
 static struct capref services [aos_service_guard];
+
+struct device_node {
+    struct capref cap;
+    uint8_t size_bits;
+    struct device_node* left;
+    struct device_node* right;
+    // TODO; maybe add a flag if dev node is mapped.
+};
+
+struct device_node root_node;
+
+static void init_device_memory (void)
+{
+    // Trial-and-error findings:
+    // It seems like cap_io covers an address space starting at 0x40000000
+    // with 30 bits. Retyping it with 29 size bits seems to split
+    // it in two new DevFrame caps located at dest and dest+1.
+    // I guess retyping it with 28 size bits
+    // generates 4 DevFrame caps.
+
+    // Therefore we need to split the IO space recursively
+    // until we get the dev frame cap at the right location
+    // and with the correct size, and then manage the fragments...
+    root_node.cap = cap_io;
+    root_node.size_bits = 30;
+    root_node.left = NULL;
+    root_node.right = NULL;
+}
+
+/**
+ * Split a device node in two equal parts.
+ */
+__attribute__((unused))
+static errval_t device_node_split (struct device_node* node)
+{
+    errval_t error;
+    uint8_t new_bits = node -> size_bits - 1;
+
+    struct capref new_cap;
+    // TODO: sometimes the slot after new_cap is occupied. Handle this case.
+    error = devframe_type (&new_cap, node -> cap, new_bits);
+
+    struct device_node* left = malloc (sizeof (struct device_node));
+    struct device_node* right = malloc (sizeof (struct device_node));
+
+    left -> cap = new_cap;
+    left -> size_bits = new_bits;
+    left -> left = NULL;
+    left -> right = NULL;
+
+    node -> left = left;
+
+    new_cap.slot +=1;// TODO: Check if this is actually correct.
+    right -> cap = new_cap;
+    right -> size_bits = new_bits;
+    right -> left = NULL;
+    right -> right = NULL;
+
+    node -> right = right;
+    return error;
+}
+
 
 /**
  * Initialize the service lookup facility.
@@ -223,6 +289,7 @@ int main(int argc, char *argv[])
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
     // cnode. Additionally, export the functionality of that system to other
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
+    init_device_memory ();
     debug_printf("initialized dev memory management\n");
 
     // TODO (milestone 3) STEP 2:
@@ -261,7 +328,7 @@ int main(int argc, char *argv[])
     lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
 
     example_index =          0 ;
-    example_size  =        128 ; 
+    example_size  =        128 ;
     example_str   = malloc(128);
 
     // Test thread creation.
