@@ -25,6 +25,7 @@
 // From Milestone 0...
 #define UART_BASE 0x48020000
 #define UART_SIZE 0x1000
+#define UART_SIZE_BITS 12
 
 #include <mm/mm.h>
 
@@ -39,31 +40,6 @@ static uint32_t example_size ;
  * Keeps track of registered services.
  */
 static struct capref services [aos_service_guard];
-
-
-
-static struct mm device_memory_manager;
-static struct slot_alloc_basecn device_memory_slot_manager;
-
-static errval_t device_memory_refill (struct slab_alloc* allocator)
-{
-    debug_printf ("init_device_memory...\n");
-    errval_t error = SYS_ERR_OK;
-
-    // Allocate space for 64 device memory nodes.
-    // NOTE: node size depends on maximum number of children
-    // (in bits, here 1 bit ~ 2 children)
-    size_t size = 64 * MM_NODE_SIZE (1);
-    void* buf = malloc (size);
-
-    if (buf == NULL) {
-        error =  1; // TODO: find a suitable error.
-    } else {
-        slab_grow (allocator, buf, size);
-    }
-    debug_printf ("init_device_memory finished.\n");
-    return error;
-}
 
 static void test_putchar (uint32_t base, char c)
 {
@@ -82,125 +58,37 @@ static void test_putchar (uint32_t base, char c)
     *uart_thr = c;
 }
 
-
-// struct device_node {
-//     struct capref cap;
-//     uint8_t size_bits;
-//     struct device_node* left;
-//     struct device_node* right;
-//     // TODO; maybe add a flag if dev node is mapped.
-// };
-// struct device_node root_node;
-
-static void init_device_memory (void)
+static errval_t spawn_serial_driver (void)
 {
-    // Trial-and-error findings:
-    // It seems like cap_io covers an address space starting at 0x40000000
-    // with 30 bits. Retyping it with 29 size bits seems to split
-    // it in two new DevFrame caps located at dest and dest+1.
-    // I guess retyping it with 28 size bits
-    // generates 4 DevFrame caps.
+    // TODO: This function just shows that serial driver works.
+    // We should actually create a thread and an endpoint, register ourselves with init,
+    // and listen for aos_rpc_connect, aos_rpc_serial_getchar and *putchar requests.
 
-    // Therefore we need to split the IO space recursively
-    // until we get the dev frame cap at the right location
-    // and with the correct size, and then manage the fragments...
-//     root_node.cap = cap_io;
-//     root_node.size_bits = 30;
-//     root_node.left = NULL;
-//     root_node.right = NULL;
+    errval_t error = SYS_ERR_OK;
 
-    // Forget it, there's a predefined solution...
-
-    // Initialize the slot allocator used by the device memory manager.
-    errval_t error = slot_alloc_basecn_init(&device_memory_slot_manager);
-    debug_printf ("init_device_memory: %s\n", err_getstring (error));
-
-    // Initialize device memory manager:
-    error = mm_init (
-        &device_memory_manager,
-        ObjType_DevFrame,       // Memory type
-        0x40000000,             // Base address
-        30,                     // Size bits
-        1,                      // Maximum number of children in bits (i.e. 2 in this case)
-        device_memory_refill,   // Slab refill function
-        slot_alloc_basecn,      // Slot allocator function (defined in lib/barrelfish/mm/slot_alloc.c)
-        &device_memory_slot_manager, // Slot allocator instance for this manager
-        true                    // Delete chunked memory nodes (i.e. nodes with children)
-    );
-
-    debug_printf ("init_device_memory: %s\n", err_getstring (error));
-
-    // Add the global device frame cap to the memory manager.
-    error = mm_add (&device_memory_manager, cap_io, 30, 0x40000000);
-
-    // Allocate the UART device frame.
+    // Get device frame capability.
     struct capref uart_cap;
-    uint64_t uart_base = 0;
+    error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
 
-    error = mm_alloc_range (
-        &device_memory_manager,
-        12,                 // 12 bits for 4096==0x1000 sized page.
-        UART_BASE,          // Minimum start address
-        UART_BASE+UART_SIZE,// Maximum address. This boundary selection forces the allocator to return the correct page.
-        &uart_cap,          // Capability to be returned.
-        &uart_base          // Base address of allocated dev frame.
-    );
-
-    debug_printf ("init_device_memory: %s\n", err_getstring (error));
-    // Check if allocation was successful.
-    assert (uart_base == UART_BASE);
-
-
-    // Map the frame
+    // Map the device into virtual address space.
     void* buf;
     int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
     error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
 
-    debug_printf ("init_device_memory: %s\n", err_getstring (error));
 
+    // Do a quick test.
     uint32_t virtual_uart_base = (uint32_t) buf;
-
     test_putchar (virtual_uart_base, '\n');
     test_putchar (virtual_uart_base, '\n');
     test_putchar (virtual_uart_base, '*');
     test_putchar (virtual_uart_base, '\n');
     test_putchar (virtual_uart_base, '\n');
 
+    if (err_is_fail (error)) {
+        debug_printf ("spawn_serial_driver: %s\n", err_getstring (error));
+    }
+    return error;
 }
-
-/**
- * Split a device node in two equal parts.
- */
-// __attribute__((unused))
-// static errval_t device_node_split (struct device_node* node)
-// {
-//     errval_t error;
-//     uint8_t new_bits = node -> size_bits - 1;
-//
-//     struct capref new_cap;
-//     // TODO: sometimes the slot after new_cap is occupied. Handle this case.
-//     error = devframe_type (&new_cap, node -> cap, new_bits);
-//
-//     struct device_node* left = malloc (sizeof (struct device_node));
-//     struct device_node* right = malloc (sizeof (struct device_node));
-//
-//     left -> cap = new_cap;
-//     left -> size_bits = new_bits;
-//     left -> left = NULL;
-//     left -> right = NULL;
-//
-//     node -> left = left;
-//
-//     new_cap.slot +=1;// TODO: Check if this is actually correct.
-//     right -> cap = new_cap;
-//     right -> size_bits = new_bits;
-//     right -> left = NULL;
-//     right -> right = NULL;
-//
-//     node -> right = right;
-//     return error;
-// }
-
 
 /**
  * Initialize the service lookup facility.
@@ -391,7 +279,16 @@ int main(int argc, char *argv[])
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
     // cnode. Additionally, export the functionality of that system to other
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
-    init_device_memory ();
+    err = initialize_device_frame_server (cap_io);
+
+    if (err_is_ok (err)) {
+        err = spawn_serial_driver ();
+    }
+
+    if (err_is_fail (err)) {
+        debug_printf ("Failed to initialize: %s\n", err_getstring (err));
+    }
+
     debug_printf("initialized dev memory management\n");
 
     // TODO (milestone 3) STEP 2:
