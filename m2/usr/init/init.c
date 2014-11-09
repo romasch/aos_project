@@ -146,7 +146,14 @@ static void recv_handler (void *arg)
 
             // debug_printf ("Requested service: %u\n", requested_service);
 
-            // TODO: Find out why lookup for services[0] == cap_initep fails.
+            // TODO<-done: Find out why lookup for services[0] == cap_initep fails.
+
+            // TODO: Apparently an endpoint can only connect to exactly one other endpoint.
+            // Therefore we need to change this function: init has to request a new endpoint
+            // at the service provider and later send it back to first domain.
+
+            // This can be done at a later point however... For now we could just implement
+            // all services in init and handle them in this global request handler.
             lmp_ep_send0 (cap, 0, services [requested_service]);
 
             // Delete capability and reuse slot.
