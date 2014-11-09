@@ -683,7 +683,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
                 error = cap_copy (copied_frame, frame);
 
                 if (err_is_ok (error)) {
-                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, 0, free_slots);
+                    error = vnode_map (cap_l2, copied_frame, l2_index, flags, 0, free_slots);
                     remaining_pages -= free_slots;
                     mapped_addr += free_slots * PAGE_SIZE;
                 } else {
@@ -692,7 +692,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
             } else {
                 // Everything fits into the current page table.
                 // Map it to the specified addresses.
-                error = vnode_map (cap_l2, frame, l2_index, FLAGS, 0, remaining_pages);
+                error = vnode_map (cap_l2, frame, l2_index, flags, 0, remaining_pages);
                 remaining_pages = 0;
             }
         }

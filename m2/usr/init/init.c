@@ -26,6 +26,8 @@
 #define UART_BASE 0x48020000
 #define UART_SIZE 0x1000
 
+#include <mm/mm.h>
+
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
@@ -38,15 +40,57 @@ static uint32_t example_size ;
  */
 static struct capref services [aos_service_guard];
 
-struct device_node {
-    struct capref cap;
-    uint8_t size_bits;
-    struct device_node* left;
-    struct device_node* right;
-    // TODO; maybe add a flag if dev node is mapped.
-};
 
-struct device_node root_node;
+
+static struct mm device_memory_manager;
+static struct slot_alloc_basecn device_memory_slot_manager;
+
+static errval_t device_memory_refill (struct slab_alloc* allocator)
+{
+    debug_printf ("init_device_memory...\n");
+    errval_t error = SYS_ERR_OK;
+
+    // Allocate space for 64 device memory nodes.
+    // NOTE: node size depends on maximum number of children
+    // (in bits, here 1 bit ~ 2 children)
+    size_t size = 64 * MM_NODE_SIZE (1);
+    void* buf = malloc (size);
+
+    if (buf == NULL) {
+        error =  1; // TODO: find a suitable error.
+    } else {
+        slab_grow (allocator, buf, size);
+    }
+    debug_printf ("init_device_memory finished.\n");
+    return error;
+}
+
+static void test_putchar (uint32_t base, char c)
+{
+    // we need to send \r\n over the serial line for a newline
+    if (c == '\n') test_putchar(base, '\r');
+
+    volatile uint32_t* uart_lsr = (uint32_t*) (base + 0x14);
+    uint32_t tx_fifo_e = 0x20;
+    volatile uint32_t* uart_thr = (uint32_t*) (base);
+
+    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)
+    while ( ((*uart_lsr) & tx_fifo_e) == 0 ) {
+        // Do nothing
+    }
+    // Write character
+    *uart_thr = c;
+}
+
+
+// struct device_node {
+//     struct capref cap;
+//     uint8_t size_bits;
+//     struct device_node* left;
+//     struct device_node* right;
+//     // TODO; maybe add a flag if dev node is mapped.
+// };
+// struct device_node root_node;
 
 static void init_device_memory (void)
 {
@@ -60,44 +104,102 @@ static void init_device_memory (void)
     // Therefore we need to split the IO space recursively
     // until we get the dev frame cap at the right location
     // and with the correct size, and then manage the fragments...
-    root_node.cap = cap_io;
-    root_node.size_bits = 30;
-    root_node.left = NULL;
-    root_node.right = NULL;
+//     root_node.cap = cap_io;
+//     root_node.size_bits = 30;
+//     root_node.left = NULL;
+//     root_node.right = NULL;
+
+    // Forget it, there's a predefined solution...
+
+    // Initialize the slot allocator used by the device memory manager.
+    errval_t error = slot_alloc_basecn_init(&device_memory_slot_manager);
+    debug_printf ("init_device_memory: %s\n", err_getstring (error));
+
+    // Initialize device memory manager:
+    error = mm_init (
+        &device_memory_manager,
+        ObjType_DevFrame,       // Memory type
+        0x40000000,             // Base address
+        30,                     // Size bits
+        1,                      // Maximum number of children in bits (i.e. 2 in this case)
+        device_memory_refill,   // Slab refill function
+        slot_alloc_basecn,      // Slot allocator function (defined in lib/barrelfish/mm/slot_alloc.c)
+        &device_memory_slot_manager, // Slot allocator instance for this manager
+        true                    // Delete chunked memory nodes (i.e. nodes with children)
+    );
+
+    debug_printf ("init_device_memory: %s\n", err_getstring (error));
+
+    // Add the global device frame cap to the memory manager.
+    error = mm_add (&device_memory_manager, cap_io, 30, 0x40000000);
+
+    // Allocate the UART device frame.
+    struct capref uart_cap;
+    uint64_t uart_base = 0;
+
+    error = mm_alloc_range (
+        &device_memory_manager,
+        12,                 // 12 bits for 4096==0x1000 sized page.
+        UART_BASE,          // Minimum start address
+        UART_BASE+UART_SIZE,// Maximum address. This boundary selection forces the allocator to return the correct page.
+        &uart_cap,          // Capability to be returned.
+        &uart_base          // Base address of allocated dev frame.
+    );
+
+    debug_printf ("init_device_memory: %s\n", err_getstring (error));
+    // Check if allocation was successful.
+    assert (uart_base == UART_BASE);
+
+
+    // Map the frame
+    void* buf;
+    int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
+    error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
+
+    debug_printf ("init_device_memory: %s\n", err_getstring (error));
+
+    uint32_t virtual_uart_base = (uint32_t) buf;
+
+    test_putchar (virtual_uart_base, '\n');
+    test_putchar (virtual_uart_base, '\n');
+    test_putchar (virtual_uart_base, '*');
+    test_putchar (virtual_uart_base, '\n');
+    test_putchar (virtual_uart_base, '\n');
+
 }
 
 /**
  * Split a device node in two equal parts.
  */
-__attribute__((unused))
-static errval_t device_node_split (struct device_node* node)
-{
-    errval_t error;
-    uint8_t new_bits = node -> size_bits - 1;
-
-    struct capref new_cap;
-    // TODO: sometimes the slot after new_cap is occupied. Handle this case.
-    error = devframe_type (&new_cap, node -> cap, new_bits);
-
-    struct device_node* left = malloc (sizeof (struct device_node));
-    struct device_node* right = malloc (sizeof (struct device_node));
-
-    left -> cap = new_cap;
-    left -> size_bits = new_bits;
-    left -> left = NULL;
-    left -> right = NULL;
-
-    node -> left = left;
-
-    new_cap.slot +=1;// TODO: Check if this is actually correct.
-    right -> cap = new_cap;
-    right -> size_bits = new_bits;
-    right -> left = NULL;
-    right -> right = NULL;
-
-    node -> right = right;
-    return error;
-}
+// __attribute__((unused))
+// static errval_t device_node_split (struct device_node* node)
+// {
+//     errval_t error;
+//     uint8_t new_bits = node -> size_bits - 1;
+//
+//     struct capref new_cap;
+//     // TODO: sometimes the slot after new_cap is occupied. Handle this case.
+//     error = devframe_type (&new_cap, node -> cap, new_bits);
+//
+//     struct device_node* left = malloc (sizeof (struct device_node));
+//     struct device_node* right = malloc (sizeof (struct device_node));
+//
+//     left -> cap = new_cap;
+//     left -> size_bits = new_bits;
+//     left -> left = NULL;
+//     left -> right = NULL;
+//
+//     node -> left = left;
+//
+//     new_cap.slot +=1;// TODO: Check if this is actually correct.
+//     right -> cap = new_cap;
+//     right -> size_bits = new_bits;
+//     right -> left = NULL;
+//     right -> right = NULL;
+//
+//     node -> right = right;
+//     return error;
+// }
 
 
 /**
