@@ -12,6 +12,7 @@
  * ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
  */
 
+#include "ipc_protocol.h"
 #include "init.h"
 #include <stdlib.h>
 #include <string.h>
@@ -36,28 +37,14 @@ static uint32_t example_index;
 static char*    example_str  ;
 static uint32_t example_size ;
 
+static struct capref service_uart;
+
 /**
  * Keeps track of registered services.
  */
 static struct capref services [aos_service_guard];
 
-static void test_putchar (uint32_t base, char c)
-{
-    // we need to send \r\n over the serial line for a newline
-    if (c == '\n') test_putchar(base, '\r');
-
-    volatile uint32_t* uart_lsr = (uint32_t*) (base + 0x14);
-    uint32_t tx_fifo_e = 0x20;
-    volatile uint32_t* uart_thr = (uint32_t*) (base);
-
-    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)
-    while ( ((*uart_lsr) & tx_fifo_e) == 0 ) {
-        // Do nothing
-    }
-    // Write character
-    *uart_thr = c;
-}
-
+__attribute__((unused))
 static errval_t spawn_serial_driver (void)
 {
     // TODO: This function just shows that serial driver works.
@@ -66,27 +53,9 @@ static errval_t spawn_serial_driver (void)
 
     errval_t error = SYS_ERR_OK;
 
-    // Get device frame capability.
-    struct capref uart_cap;
-    error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
+    thread_create(uart_driver_thread, NULL);
+    thread_create(   terminal_thread, NULL);
 
-    // Map the device into virtual address space.
-    void* buf;
-    int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
-    error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
-
-
-    // Do a quick test.
-    uint32_t virtual_uart_base = (uint32_t) buf;
-    test_putchar (virtual_uart_base, '\n');
-    test_putchar (virtual_uart_base, '\n');
-    test_putchar (virtual_uart_base, '*');
-    test_putchar (virtual_uart_base, '\n');
-    test_putchar (virtual_uart_base, '\n');
-
-    if (err_is_fail (error)) {
-        debug_printf ("spawn_serial_driver: %s\n", err_getstring (error));
-    }
     return error;
 }
 
@@ -217,6 +186,60 @@ static void recv_handler (void *arg)
                 printf("%s\n", example_str);
             }
             break;
+        case AOS_REGISTER_SERVICE:;
+            errval_t status = STATUS_ALREADY_EXIST;
+
+            debug_printf ("Handled AOS_REGISTER_SERVICE ot type 0x%x\n", msg.words [1]);
+
+            // Requested service must be unfilled and provider must pass a capp for communication
+            if (!capref_is_null(cap)) {
+                void* buf;
+
+                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 1\n", msg.words [1]);
+                if (capref_is_null(service_uart)) {
+                    if (msg.words[1] == SERVICE_UART_DRIVER) {
+                        debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]);
+
+                        struct capref uart_cap;
+
+                        status = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
+                        if (!err_is_fail (status)) {
+                            int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
+
+                            status = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
+                            if (!err_is_fail (status)) {
+                                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]);
+                                service_uart = cap           ;
+                                status       = STATUS_SUCCESS;
+                            }
+                        }
+                    }
+                }
+
+                lmp_ep_send3(cap, 0, NULL_CAP, AOS_REGISTRATION_COMPETE, status, (uint32_t)buf);
+
+                lmp_ep_send1(cap, 0, NULL_CAP, UART_CONNECT   );
+                lmp_ep_send1(cap, 0, NULL_CAP, UART_RECV_BYTE );
+                lmp_ep_send2(cap, 0, NULL_CAP, UART_SEND_BYTE , 'x');
+                lmp_ep_send1(cap, 0, NULL_CAP, UART_DISCONNECT);
+            }
+            break;
+
+        case AOS_GET_SERVICE:;
+
+            debug_printf ("Handled AOS_GET_SERVICE ot type 0x%x\n", msg.words [1]);
+
+            if (!capref_is_null(cap)) {
+                if (msg.words[1] == SERVICE_UART_DRIVER) {
+                    lmp_ep_send1(cap, 0, service_uart, AOS_GET_SERVICE);
+                }
+            }
+
+            break;
+
+        case UART_RECV_BYTE:;
+            debug_printf ("Handled UART_RECV_BYTE received '%c'\n", msg.words [1]);
+            break;
 
         default:
             debug_printf ("Got default value\n");
@@ -246,9 +269,53 @@ static int test_thread (void* arg)
     return 0;
 }
 
+
+// NOTE: can only be used for cap_initep...
+/*
+static errval_t create_channel(struct capref* cap, void (*handler)(void*))
+{
+    errval_t err = SYS_ERR_OK;
+
+    // Allocate an LMP channel and do basic initializaton.
+    struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
+
+    if (channel != NULL) {
+        lmp_chan_init (channel);
+
+
+        struct lmp_endpoint* endpoint; // Structure to be filled in.
+
+        err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &endpoint);
+        if (err_is_fail(err)) {
+            debug_printf ("ERROR: On endpoint setup.\n");
+        } else {
+            channel->endpoint  = endpoint;
+            channel->local_cap = *cap    ;
+
+            err = lmp_chan_alloc_recv_slot(channel);
+            if (err_is_fail(err)) {
+                debug_printf ("ERROR: On allocation of recv slot.\n");
+            } else {
+                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
+                if (err_is_fail(err))
+                {
+                    debug_printf ("ERROR: On channel registration.\n");
+                }
+            }
+        }
+    } else {
+        // malloc returned NULL...
+        err = LIB_ERR_MALLOC_FAIL;
+    }
+
+    return err;
+}//*/
+
 int main(int argc, char *argv[])
 {
     errval_t err;
+
+    service_uart = NULL_CAP;
 
     /* Set the core id in the disp_priv struct */
     err = invoke_kernel_get_core_id(cap_kernel, &my_core_id);
@@ -288,8 +355,26 @@ int main(int argc, char *argv[])
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
     err = initialize_device_frame_server (cap_io);
 
+
+    // TODO (milestone 3) STEP 2:
+
+    /*
+    // Allocate an LMP channel and do basic initializaton.
+    err = create_channel(&cap_initep, recv_handler);
+    if (err_is_fail(err)) {
+        debug_printf("ERROR! Channel for INIT wasn't created\n");
+    }
+    err = create_channel(&cap_uartep, recv_handler);
+    if (err_is_fail(err)) {
+        debug_printf("ERROR! Channel for UART wasn't created\n");
+    }
+    err = create_channel(&cap_termep, recv_handler);
+    if (err_is_fail(err)) {
+        debug_printf("ERROR! Channel for TERM wasn't created\n");
+    }*/
+
     if (err_is_ok (err)) {
-        err = spawn_serial_driver ();
+//         err = spawn_serial_driver ();
     }
 
     if (err_is_fail (err)) {
@@ -298,21 +383,19 @@ int main(int argc, char *argv[])
 
     debug_printf("initialized dev memory management\n");
 
-    // TODO (milestone 3) STEP 2:
 
     // Set up the basic service registration mechanism.
     init_services ();
-
+#if 1
     // Get the default waitset.
     struct waitset* default_ws = get_default_waitset ();
 
-    // Allocate an LMP channel and do basic initializaton.
     struct lmp_chan* my_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
     lmp_chan_init (my_channel);
 
     /* make local endpoint available -- this was minted in the kernel in a way
      * such that the buffer is directly after the dispatcher struct and the
-     * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel 
+     * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel
      * sentinel word).
      *
      * NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
@@ -332,7 +415,7 @@ int main(int argc, char *argv[])
 
     // Register a receive handler.
     lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
-
+#endif
     example_index =          0 ;
     example_size  =        128 ;
     example_str   = malloc(128);
@@ -342,13 +425,12 @@ int main(int argc, char *argv[])
 
     // Go into messaging main loop.
     while (true) {
-        err = event_dispatch (default_ws);// TODO: error handling
+        err = event_dispatch (get_default_waitset());// TODO: error handling
         if (err_is_fail (err)) {
             debug_printf ("Handling LMP message: %s\n", err_getstring (err));
         }
     }
 
-//     for (;;) sys_yield(CPTR_NULL);
     debug_printf ("init returned.");
     return EXIT_SUCCESS;
 
