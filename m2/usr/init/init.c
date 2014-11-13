@@ -237,6 +237,18 @@ static void recv_handler (void *arg)
 
             break;
 
+
+        case AOS_RPC_SERIAL_PUTCHAR:;
+            debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
+            char output_character = msg.words [1];
+            uart_putchar (output_character);
+            uart_putchar ('\n');
+            break;
+        case AOS_RPC_SERIAL_GETCHAR:;
+            debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
+            char input_character = uart_getchar ();
+            lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
+            break;
         case UART_RECV_BYTE:;
             debug_printf ("Handled UART_RECV_BYTE received '%c'\n", msg.words [1]);
             break;
@@ -375,6 +387,7 @@ int main(int argc, char *argv[])
 
     if (err_is_ok (err)) {
 //         err = spawn_serial_driver ();
+        init_uart_driver ();
     }
 
     if (err_is_fail (err)) {

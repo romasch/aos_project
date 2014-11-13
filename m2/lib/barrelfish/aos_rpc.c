@@ -235,16 +235,43 @@ errval_t aos_rpc_get_dev_cap(struct aos_rpc *chan, lpaddr_t paddr,
 
 errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc)
 {
-    // TODO (milestone 4): implement functionality to request a character from
-    // the serial driver.
-    return SYS_ERR_OK;
+    // Request a character from the serial driver.
+
+    struct lmp_chan* channel = &chan->channel;
+    errval_t error = SYS_ERR_OK;
+
+    // Initialize storage for message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the send arguments.
+    args.message.words [0] = AOS_RPC_SERIAL_GETCHAR;
+
+    // Do the IPC call.
+    error = aos_send_receive (&args, true);
+    print_error (error, "aos_rpc_get_ram_cap: communication failed. %s\n", err_getstring (error));
+
+    // Get the result.
+    if (err_is_ok (error)) {
+
+        error = args.message.words [0];
+        print_error (error, "aos_rpc_get_ram_cap: RAM allocation failed. %s\n", err_getstring (error));
+
+        if (err_is_ok (error)) {
+            *retc = args.message.words [1];
+        }
+    }
+    return error;
 }
 
 
 errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c)
 {
-    // TODO (milestone 4): implement functionality to send a character to the
-    // serial port.
+    // Send a character to the serial port.
+    struct lmp_chan* channel = &chan->channel;
+
+    uint32_t flags = LMP_FLAG_SYNC | LMP_FLAG_YIELD;
+    lmp_chan_send2 (channel, flags, NULL_CAP, AOS_RPC_SERIAL_PUTCHAR, c);
     return SYS_ERR_OK;
 }
 

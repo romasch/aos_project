@@ -70,6 +70,11 @@ int main(int argc, char *argv[])
     }
     debug_printf ("Buffer filled.\n");
 
+    aos_rpc_serial_putchar (&arpc, '+');
+    char c [3] = {0, '\n',0};
+    aos_rpc_serial_getchar (&arpc, c);
+    debug_printf (c);
+
     debug_printf ("memeater returned\n");
     return 0;
 }

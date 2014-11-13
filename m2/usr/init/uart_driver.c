@@ -12,6 +12,26 @@ static bool terminate = false;
 
 static uint32_t dev_base;
 
+// From Milestone 0...
+#define UART_BASE 0x48020000
+#define UART_SIZE 0x1000
+#define UART_SIZE_BITS 12
+void init_uart_driver (void){
+
+    // Get device frame capability.
+    struct capref uart_cap;
+    errval_t error = 0;
+    error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
+
+    // Map the device into virtual address space.
+     void* buf;
+     int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
+     error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
+
+    dev_base = (uint32_t) buf;
+}
+
+
 /*static void client_handler(void *arg)
 {
     struct capref        cap;
@@ -62,7 +82,7 @@ static uint32_t dev_base;
     lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(client_handler, NULL));
 }*/
 
-static char uart_getchar(void)
+char uart_getchar(void)
 {
     volatile uint32_t* uart_lsr = (uint32_t*) (dev_base + 0x14);
     volatile uint32_t* uart_rhr = (uint32_t*) (dev_base       );
@@ -72,7 +92,7 @@ static char uart_getchar(void)
     return *uart_rhr;
 }
 
-static void uart_putchar(char c)
+void uart_putchar(char c)
 {
     volatile uint32_t* uart_lsr = (uint32_t*) (dev_base + 0x14);
     volatile uint32_t* uart_thr = (uint32_t*) (dev_base       );
