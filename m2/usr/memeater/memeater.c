@@ -39,6 +39,42 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
     return i;
 }
 
+
+/**
+ * A simple shell that handles echo, run_memtest and exit commands.
+ */
+static void start_shell (void)
+{
+    char command [32];
+    char str [256];
+    int number = 0;
+
+    while (true) {
+        scanf ("%s", command);
+        if (strcmp(command, "echo") == 0) {
+            scanf ("%s", str);
+            printf ("%s", str);
+        } else if (strcmp (command, "run_memtest") == 0) {
+
+            scanf ("%i", &number);
+
+            if (number > 0) {
+                debug_printf ("Running memtest.\n");
+                char* buf = malloc (BUFSIZE);
+                for (int i=0; i<BUFSIZE; i++) {
+                    buf[i] = i % 255;
+                }
+                free (buf);
+                debug_printf ("Memtest finished.\n");
+            }
+        } else if (strcmp (command, "exit") == 0) {
+            break;
+        } else {
+            // ignore
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     debug_printf("memeater started\n");
@@ -106,14 +142,7 @@ int main(int argc, char *argv[])
     _libc_terminal_read_func = aos_rpc_terminal_read;
     _libc_terminal_write_func = aos_rpc_terminal_write;
 
-    printf ("abc\n");
-    char input [256];
-    char input2 [256];
-    scanf ("%s %s", input, input2);
-//     aos_rpc_terminal_read (input, 256);
-    debug_printf ("%s %s\n", input, input2);
-
-
+    start_shell ();
 
     debug_printf ("memeater returned\n");
     return 0;
