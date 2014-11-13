@@ -249,13 +249,13 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc)
 
     // Do the IPC call.
     error = aos_send_receive (&args, true);
-    print_error (error, "aos_rpc_get_ram_cap: communication failed. %s\n", err_getstring (error));
+    print_error (error, "aos_rpc_serial_getchar: communication failed. %s\n", err_getstring (error));
 
     // Get the result.
     if (err_is_ok (error)) {
 
         error = args.message.words [0];
-        print_error (error, "aos_rpc_get_ram_cap: RAM allocation failed. %s\n", err_getstring (error));
+        print_error (error, "aos_rpc_serial_getchar: operation failed. %s\n", err_getstring (error));
 
         if (err_is_ok (error)) {
             *retc = args.message.words [1];

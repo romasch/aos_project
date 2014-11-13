@@ -45,6 +45,7 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
  */
 static void start_shell (void)
 {
+    debug_printf ("Started simple shell...\n");
     char command [32];
     char str [256];
     int number = 0;
