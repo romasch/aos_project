@@ -6,10 +6,38 @@
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan.h>
 
+
+extern size_t (*_libc_terminal_read_func)(char *, size_t);
+extern size_t (*_libc_terminal_write_func)(const char *, size_t);
+
 // #define BUFSIZE (128UL*1024*1024)
 #define BUFSIZE (4UL*1024*1024)
 
 extern struct lmp_chan bootstrap_channel;
+
+
+static struct aos_rpc arpc;
+
+static size_t aos_rpc_terminal_write(const char *buf, size_t len)
+{
+    for (int i=0; i<len; i++) {
+        aos_rpc_serial_putchar (&arpc, buf[i]);
+    }
+    return 0;
+}
+
+static size_t aos_rpc_terminal_read (char *buf, size_t len)
+{
+    // probably scanf always only wants to read one character anyway...
+    int i = 0;
+    char c;
+    do {
+        aos_rpc_serial_getchar (&arpc, &c);
+        buf [i] = c;
+        i++;
+    } while (c != '\n' && c != '\r' && i+1 < len);
+    return i;
+}
 
 int main(int argc, char *argv[])
 {
@@ -34,7 +62,6 @@ int main(int argc, char *argv[])
     // Test opening another channel.
     // NOTE: A first channel is already created to talk to RAM server.
 
-    struct aos_rpc arpc;
     error = aos_rpc_init(&arpc, cap_initep);
     if (err_is_fail (error)) {
         debug_printf ("Error! in aos_rpc_init(0x%x) = %u", 0U, error);
@@ -74,6 +101,19 @@ int main(int argc, char *argv[])
     char c [3] = {0, '\n',0};
     aos_rpc_serial_getchar (&arpc, c);
     debug_printf (c);
+
+    // NOTE: actually we should do this way earlier, in lib/barrelfish/init.c
+    _libc_terminal_read_func = aos_rpc_terminal_read;
+    _libc_terminal_write_func = aos_rpc_terminal_write;
+
+    printf ("abc\n");
+    char input [256];
+    char input2 [256];
+    scanf ("%s %s", input, input2);
+//     aos_rpc_terminal_read (input, 256);
+    debug_printf ("%s %s\n", input, input2);
+
+
 
     debug_printf ("memeater returned\n");
     return 0;
