@@ -68,7 +68,7 @@ enum aos_service {
  * Receive Args: Error code
  * Receive Capability: endpoint capability of specified service
  */
-#define AOS_ROUTE_FIND_SERVICE 9
+#define AOS_ROUTE_FIND_SERVICE 2
 
 
 /**
@@ -86,7 +86,7 @@ enum aos_service {
  * Receive Args: AOS_ROUTE_DELIVER_EP, error code, identifier
  * Receive Capability: Newly created endpoint
  */
-#define AOS_ROUTE_REQUEST_EP 10
+#define AOS_ROUTE_REQUEST_EP 3
 
 /**
  * Deliver an endpoint to the correct target.
@@ -102,7 +102,7 @@ enum aos_service {
  * Response: None (The message will be
  * used as a response to AOS_ROUTE_FIND_SERVICE)
  */
-#define AOS_ROUTE_DELIVER_EP 11
+#define AOS_ROUTE_DELIVER_EP 4
 
 /**
  * Get a RAM capability.
@@ -114,7 +114,7 @@ enum aos_service {
  * Receive Args: error value, actual size in bits
  * Receive Capability: RAM cap
  */
-#define AOS_RPC_GET_RAM_CAP 4
+#define AOS_RPC_GET_RAM_CAP 5
 
 /**
  * Send a (partial) string.
@@ -126,7 +126,7 @@ enum aos_service {
  * Receive Args: no reply
  * Receive Capability: -
  */
-#define AOS_RPC_SEND_STRING 5
+#define AOS_RPC_SEND_STRING 6
 
 /**
  * Send a character to be printed by the UART driver.
@@ -138,7 +138,7 @@ enum aos_service {
  * Receive Args: no reply
  * Receive Capability: -
  */
-#define AOS_RPC_SERIAL_PUTCHAR 6
+#define AOS_RPC_SERIAL_PUTCHAR 7
 
 /**
  * Request a single character from the UART driver.
@@ -150,7 +150,7 @@ enum aos_service {
  * Receive Args: error value, input character
  * Receive Capability: -
  */
-#define AOS_RPC_SERIAL_GETCHAR 7
+#define AOS_RPC_SERIAL_GETCHAR 8
 
 /**
  * Finalize an LMP connection by sending the local endpoint capability.
@@ -162,27 +162,10 @@ enum aos_service {
  * Receive Args: error value
  * Receive Capability: -
  */
-#define AOS_RPC_CONNECTION_INIT 8
-
-
-enum rpc_datatype {
-    UNDEFINED = 0,
-    NT_STRING = 1
-};
-
-// enum rpc_state {
-//     RPC_STATE_DISCONNECTED = 0,
-//     RPC_STATE_READY,
-//     RPC_STATE_WAITING
-// };
+#define AOS_RPC_CONNECTION_INIT 9
 
 struct aos_rpc {
     struct lmp_chan channel;
-//     enum rpc_state state; // not sure if needed...
-
-//     struct capref       target   ;
-//     enum   rpc_datatype data_type;
-    
     // TODO: add state for your implementation
 };
 
