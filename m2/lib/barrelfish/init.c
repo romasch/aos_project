@@ -216,18 +216,34 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     // Wait for init to acknowledge receiving the endpoint.
     error = event_dispatch (get_default_waitset());
 
+    // Tell init endpoint the new local endpoint.
+    error = aos_connection_init (init_channel);
+
+
     // STEP 5: now we should have a channel with init set up and can
     // use it for the ram allocator
 
-    struct capref ram_server_endpoint = NULL_CAP;
+//     struct capref ram_server_endpoint = NULL_CAP;
 
     // TODO: find out why aos_find_service doesn't work.
 //     error = aos_find_service (aos_service_ram, &ram_server_endpoint);
-    ram_server_endpoint = cap_initep;
+//     ram_server_endpoint = cap_initep;
 
-    error = aos_rpc_init (&ram_server_connection, ram_server_endpoint);
+//     error = aos_rpc_init (&ram_server_connection, ram_server_endpoint);
+    ram_server_connection.channel = bootstrap_channel;
 
     error = ram_alloc_set (ram_alloc_ipc);
+
+    // Test routing
+    struct capref test_thread;
+    error = aos_find_service (aos_service_test, &test_thread);
+    struct lmp_chan test;
+    lmp_chan_init (&test);
+    lmp_chan_accept (&test, DEFAULT_LMP_BUF_WORDS, test_thread);
+    lmp_ep_send1 (test_thread, LMP_SEND_FLAGS_DEFAULT, test.local_cap, AOS_PING);
+    error = lmp_chan_register_recv (&test, get_default_waitset(), MKCLOSURE (test_handler, &test));
+    error = event_dispatch (get_default_waitset());
+    debug_printf ("aos_find_service: %s\n", err_getstring (error));
 
 
     // right now we don't have the nameservice & don't need the terminal

@@ -131,6 +131,8 @@ int main(int argc, char *argv[])
     if (err_is_fail (error)) {
         debug_printf ("Error! in aos_rpc_init(0x%x) = %u", 0U, error);
     }
+    arpc.channel = bootstrap_channel;
+    aos_rpc_serial_putchar (&arpc, '*');
 
     aos_ping (&bootstrap_channel, 46);
     aos_ping (&arpc.channel, 42);
@@ -170,6 +172,9 @@ int main(int argc, char *argv[])
     // NOTE: actually we should do this way earlier, in lib/barrelfish/init.c
     _libc_terminal_read_func = aos_rpc_terminal_read;
     _libc_terminal_write_func = aos_rpc_terminal_write;
+
+    struct capref test_ep;
+    aos_find_service (aos_service_test, &test_ep);
 
     start_shell ();
 

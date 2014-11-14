@@ -174,7 +174,7 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
                 }
             }
 
-            error = lmp_ep_send9(chan->target, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
+            error = lmp_chan_send9(&chan->channel, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
             debug_printf_quiet ("transferred 32 bytes: %s\n", err_getstring (error));
 
             if (err_is_fail (error)) {
@@ -360,9 +360,10 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
         init_lmp_message_args (&my_args, &bootstrap_channel);
 
         // Set up the arguments according to IPC convention.
-        my_args.message.words [0] = INIT_FIND_SERVICE;
+//         my_args.message.words [0] = INIT_FIND_SERVICE;
+        my_args.message.words [0] = AOS_ROUTE_FIND_SERVICE;
         my_args.message.words [1] = service;
-        my_args.cap = my_args.channel -> local_cap;
+//         my_args.cap = my_args.channel -> local_cap;
 
         // Do the actual IPC call.
         error = aos_send_receive (&my_args, true);
@@ -370,7 +371,10 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
 
         // Set the result parameter.
         if (err_is_ok (error)) {
+            error = my_args.message.words [0];
             *endpoint = my_args.cap;
+
+            error = lmp_chan_alloc_recv_slot (my_args.channel); // TODO; better error handling
         }
     }
     print_error (error, "aos_find_service:%s\n", err_getstring (error));
@@ -449,5 +453,31 @@ errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
         rpc->data_type = UNDEFINED;
     }
 
+    return error;
+}
+
+
+errval_t aos_connection_init (struct lmp_chan* channel)
+{
+    // Send our endpoint to the other side.
+    errval_t error = SYS_ERR_OK;
+
+    // Initialize storage for message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the send arguments.
+    args.message.words [0] = AOS_RPC_CONNECTION_INIT;
+    args.cap = channel -> local_cap;
+
+    // Do the IPC call.
+    error = aos_send_receive (&args, true);
+    print_error (error, "aos_connection_init: communication failed. %s\n", err_getstring (error));
+
+    // Get the result.
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+        print_error (error, "aos_connection_init: operation failed. %s\n", err_getstring (error));
+    }
     return error;
 }

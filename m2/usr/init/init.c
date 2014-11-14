@@ -42,7 +42,11 @@ static struct capref service_uart;
 /**
  * Keeps track of registered services.
  */
-static struct capref services [aos_service_guard];
+static struct lmp_chan* services [aos_service_guard];
+
+// TODO: use a system that supports removal as well.
+static struct lmp_chan* find_request [100];
+static int find_request_index = 0;
 
 __attribute__((unused))
 static errval_t spawn_serial_driver (void)
@@ -65,11 +69,11 @@ static errval_t spawn_serial_driver (void)
 static void init_services (void) {
 
     for (int i=0; i<aos_service_guard; i++) {
-        services [i] = NULL_CAP;
+        services [i] = NULL;
     }
 
     // Currently we're using init as the ram server.
-    services [aos_service_ram] = cap_initep;
+//     services [aos_service_ram] = cap_initep;
 }
 
 /**
@@ -123,7 +127,9 @@ static void recv_handler (void *arg)
 
             // This can be done at a later point however... For now we could just implement
             // all services in init and handle them in this global request handler.
-            lmp_ep_send0 (cap, 0, services [requested_service]);
+//             lmp_ep_send0 (cap, 0, services [requested_service]);
+            lmp_ep_send1 (services [requested_service]->remote_cap, 0, services [requested_service]->local_cap, AOS_PING);
+            lmp_ep_send0 (cap, 0, NULL_CAP);
 
             // Delete capability and reuse slot.
             cap_delete (cap);
@@ -249,6 +255,47 @@ static void recv_handler (void *arg)
             char input_character = uart_getchar ();
             lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
             break;
+        case AOS_RPC_CONNECTION_INIT:;
+            debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
+            lc->remote_cap = cap;
+            err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
+            lmp_chan_send1 (lc, 0, NULL_CAP, err);
+            break;
+
+        case AOS_ROUTE_FIND_SERVICE:;
+            debug_printf ("Got AOS_ROUTE_FIND_SERVICE\n");
+            // generate new ID
+            uint32_t id = find_request_index;
+            find_request_index++;
+            // store current channel at ID
+            find_request [id] = lc;
+            // find correct server channel
+            requested_service = msg.words [1];
+            struct lmp_chan* serv = services [requested_service];
+            // generate AOS_ROUTE_REQUEST_EP request with ID.
+            lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
+            break;
+        case AOS_ROUTE_REQUEST_EP:;
+            debug_printf ("Got AOS_ROUTE_REQUEST_EP\n");
+            // Extract request ID
+            // Create a new endpoint with accept (using NULL_CAP)
+            // Generate answer with AOS_ROUTE_DELIVER_EP, error value and request ID
+            // NOTE: implemented by all servers, and init usually doesn't handle this.
+            break;
+        case AOS_ROUTE_DELIVER_EP:;
+            debug_printf ("Got AOS_ROUTE_DELIVER_EP\n");
+            // get error value and ID from message
+            errval_t error_ret = msg.words [1];
+            id = msg.words [2];
+            // lookup receiver channel at ID
+            struct lmp_chan* recv = find_request [id]; // TODO: delete id
+            // generate response with cap and error value
+            lmp_chan_send1 (recv, 0, cap, error_ret);
+            // Delete cap and reuse slot
+            err = cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            lmp_chan_alloc_recv_slot (lc);
+            break;
         case UART_RECV_BYTE:;
             debug_printf ("Handled UART_RECV_BYTE received '%c'\n", msg.words [1]);
             break;
@@ -263,8 +310,72 @@ static void recv_handler (void *arg)
     lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
 }
 
+static void test_thread_handler (void *arg)
+{
+    debug_printf ("LMP message in thread...\n");
+    errval_t err = SYS_ERR_OK;
+    struct lmp_chan* lc = (struct lmp_chan*) arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+
+    // Retrieve capability and arguments.
+    err = lmp_chan_recv(lc, &msg, &cap);
+    if (err_is_fail(err) && lmp_err_is_transient(err)) {
+        // reregister
+        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(test_thread_handler, arg));
+    }
+    uint32_t type = msg.words [0];
+    switch (type)
+    {
+        case AOS_PING:
+            debug_printf ("Got AOS_PING\n");
+            // Send a response to the ping request.
+            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
+
+            // Delete capability and reuse slot.
+            err = cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
+            break;
+        case AOS_ROUTE_REQUEST_EP:;
+            debug_printf ("Got AOS_ROUTE_REQUEST_EP\n");
+
+            // Extract request ID
+            uint32_t id = msg.words [1];
+            uint32_t error_ret = SYS_ERR_OK;
+
+            // Create a new endpoint.
+            struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
+            lmp_chan_init (channel);
+
+            // Initialize endpoint to receive messages.
+            error_ret = lmp_chan_accept (channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+            error_ret = lmp_chan_alloc_recv_slot (channel);
+            error_ret = lmp_chan_register_recv (channel, get_default_waitset (), MKCLOSURE (test_thread_handler, channel));// TODO: error handling
+
+            // Generate answer with AOS_ROUTE_DELIVER_EP, error value and request ID
+            lmp_chan_send3 (lc,0, channel->local_cap, AOS_ROUTE_DELIVER_EP, error_ret, id);
+
+            break;
+        case AOS_RPC_CONNECTION_INIT:;
+            debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
+            lc->remote_cap = cap;
+            err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
+            lmp_chan_send1 (lc, 0, NULL_CAP, err);
+            break;
+        default:
+            debug_printf ("Got default value\n");
+            if (! capref_is_null (cap)) {
+                cap_delete (cap);
+                lmp_chan_set_recv_slot (lc, cap);
+            }
+    }
+    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(test_thread_handler, arg));
+}
+
 static int test_thread (void* arg)
 {
+    errval_t error;
     // A small test for our separate page fault handler.
     debug_printf ("test_thread: new thread created...\n");
     size_t bufsize = 4*1024*1024;
@@ -274,12 +385,31 @@ static int test_thread (void* arg)
         buf [i] = i%256;
     }
     debug_printf ("test_thread: buffer filled.\n");
-
     free (buf);
 
+    struct capref* init_capability = arg;
+
+    // Manually create the connection between init's main thread this test thread.
+    struct lmp_chan* thread_channel = malloc (sizeof (struct lmp_chan));
+    lmp_chan_init (thread_channel);
+
+    error = lmp_chan_accept (thread_channel, DEFAULT_LMP_BUF_WORDS, *init_capability);
+    error = lmp_chan_alloc_recv_slot (thread_channel);
+    lmp_chan_register_recv (thread_channel, get_default_waitset (), MKCLOSURE (test_thread_handler, thread_channel));// TODO: error handling
+
+    // We do it the lazy way now...
+    services [aos_service_test] -> remote_cap = thread_channel->local_cap;
+
+    while (true) {
+        event_dispatch (get_default_waitset());
+    }
+
+    debug_printf ("aos_rpc_init: created local endpoint. %s\n", err_getstring (error));
     debug_printf ("test_thread: end of thread reached.\n");
     return 0;
 }
+
+
 
 
 // NOTE: can only be used for cap_initep...
@@ -433,8 +563,16 @@ int main(int argc, char *argv[])
     example_size  =        128 ;
     example_str   = malloc(128);
 
+
+    // TEST: set up a new channel for a user-level thread to communicate with main thread.
+    struct lmp_chan* init_channel = malloc (sizeof (struct lmp_chan));
+    lmp_chan_init (init_channel);
+    err = lmp_chan_accept (init_channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+    err = lmp_chan_alloc_recv_slot (init_channel);
+    lmp_chan_register_recv (init_channel, default_ws, MKCLOSURE (recv_handler, init_channel));// TODO: error handling
+    services [aos_service_test] = init_channel;
     // Test thread creation.
-    thread_create (test_thread, NULL);
+    thread_create (test_thread, &init_channel->local_cap);
 
     // Go into messaging main loop.
     while (true) {

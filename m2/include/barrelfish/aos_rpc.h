@@ -24,6 +24,7 @@ enum aos_service {
     aos_service_serial,
     //...
 
+    aos_service_test,
     // NOTE: Must be last!
     aos_service_guard
 };
@@ -126,6 +127,22 @@ enum aos_service {
  * Receive Capability: -
  */
 #define AOS_RPC_SERIAL_GETCHAR 7
+
+/**
+ * Finalize an LMP connection by sending the local endpoint capability.
+ *
+ * Type: Synchronous
+ * Target: any
+ * Send Args: -
+ * Send Capability: The local endpoint of the channel.
+ * Receive Args: error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_CONNECTION_INIT 8
+
+#define AOS_ROUTE_FIND_SERVICE 9
+#define AOS_ROUTE_REQUEST_EP 10
+#define AOS_ROUTE_DELIVER_EP 11
 
 enum rpc_datatype {
     UNDEFINED = 0,
@@ -298,6 +315,9 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint);
  * \brief Register a service of the current process with init.
  */
 errval_t aos_register_service (uint32_t service, struct capref endpoint);
+
+
+errval_t aos_connection_init (struct lmp_chan* channel);
 
 /**
  * Ping a domain.
