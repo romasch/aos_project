@@ -96,7 +96,7 @@ static void start_shell (void)
                 free (mbuf);
                 debug_printf ("Memtest finished.\n");
             }
-        } else if (start_with ("exit", buf) != false) {
+        } else if (starts_with ("exit", buf) != false) {
             break;
         } else {
             // ignore
