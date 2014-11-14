@@ -18,6 +18,13 @@ extern struct lmp_chan bootstrap_channel;
 
 static struct aos_rpc arpc;
 
+static bool starts_with(const char *prefix, const char *str)
+{
+    uint32_t lenpre = strlen(prefix);
+
+    return (( strlen(str) < lenpre ) ? ( false ) : ( strncmp(prefix, str, lenpre) == 0 ));
+}
+
 static size_t aos_rpc_terminal_write(const char *buf, size_t len)
 {
     for (int i=0; i<len; i++) {
@@ -46,29 +53,50 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
 static void start_shell (void)
 {
     debug_printf ("Started simple shell...\n");
-    char command [32];
-    char str [256];
-    int number = 0;
+    
+    char buf[256];
+    int  number   = 0;
 
     while (true) {
-        scanf ("%s", command);
-        if (strcmp(command, "echo") == 0) {
-            scanf ("%s", str);
-            printf ("%s", str);
-        } else if (strcmp (command, "run_memtest") == 0) {
+        bool finished = false;
+        int  i        = 0    ;
 
-            scanf ("%i", &number);
+        // Collect input characters in the string buffer until the moment
+        // when we will have 'carriage return' character.
+        // Then we will consider it as a single statement
+        for (; (finished == false) && (i < 256); i++) {
+            aos_rpc_serial_getchar(&arpc, &buf[i]);
+            
+            if (buf[i] == '\r') {
+                finished = true; 
 
+                // We don't want to see 'CRNL' line ending
+                buf[i] = '\n';
+
+                // Reflect character back to the terminal to 
+                // let the user see what he typing.
+                aos_rpc_serial_putchar(&arpc, buf[i]);       
+            } else {     
+                aos_rpc_serial_putchar(&arpc, buf[i]);       
+            }
+        }
+        
+        // Start statement processing.
+        if (starts_with("echo", buf) != false) {
+            printf ("echo: %s", &buf[5]);
+        } else if (starts_with("run_memtest ", buf) != false) {
+            number = atoi(&buf[12]); 
+            
             if (number > 0) {
                 debug_printf ("Running memtest.\n");
-                char* buf = malloc (BUFSIZE);
-                for (int i=0; i<BUFSIZE; i++) {
-                    buf[i] = i % 255;
+                char* mbuf = malloc (BUFSIZE);
+                for (int mi=0; mi<BUFSIZE; mi++) {
+                    mbuf[mi] = mi % 255;
                 }
-                free (buf);
+                free (mbuf);
                 debug_printf ("Memtest finished.\n");
             }
-        } else if (strcmp (command, "exit") == 0) {
+        } else if (start_with ("exit", buf) != false) {
             break;
         } else {
             // ignore
