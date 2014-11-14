@@ -120,24 +120,12 @@ static void init_recv_handler(struct aos_chan *ac, struct lmp_recv_msg *msg, str
 }
 #endif
 
-//TODO: This global variable should be better encapsulated...
-// Currently it's also used in aos_rpc.c
-struct lmp_chan bootstrap_channel;
-struct aos_rpc ram_server_connection;
-
-static void test_handler (void* arg) {
-
-    struct lmp_chan* channel = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-    errval_t error = lmp_chan_recv(channel, &msg, &cap);
-    debug_printf ("Received ACK: %s\n", err_getstring (error));
-}
-
-static errval_t __attribute__((unused))  ram_alloc_ipc (struct capref *ret, uint8_t size_bits, uint64_t minbase, uint64_t maxlimit)
+// RAM allocation function over IPC.
+static struct aos_rpc* ram_server_connection;
+static errval_t ram_alloc_ipc (struct capref *ret, uint8_t size_bits, uint64_t minbase, uint64_t maxlimit)
 {
     size_t ret_bits; // TODO: handle this...
-    errval_t error = aos_rpc_get_ram_cap (&ram_server_connection, size_bits, ret, &ret_bits);
+    errval_t error = aos_rpc_get_ram_cap (ram_server_connection, size_bits, ret, &ret_bits);
     debug_printf ("Allocating %u bits: %s\n", size_bits, err_getstring (error));
     return error;
 }
@@ -191,60 +179,36 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         return SYS_ERR_OK;
     }
 
-    // TODO STEP 3: register ourselves with init
+    // STEP 3: register ourselves with init
     debug_printf ("Initializing LMP system...\n");
-    errval_t error; // TODO: error handling
 
-    // Allocate lmp channel structure.
-
-    // NOTE: We can't use malloc here, because this stupid ram allocator
-    // only allows frames of one page size, and our paging code doesn't allow this.
-    struct lmp_chan* init_channel = &bootstrap_channel;
-
+    // The following function does all of these steps:
     // Create local endpoint
     // Set remote endpoint to init's endpoint
-    error = lmp_chan_accept (init_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
-
-    // Set receive handler
-    // TODO: Use proper receive handler.
-    error = lmp_chan_register_recv (init_channel, get_default_waitset(), MKCLOSURE (test_handler, init_channel));
-
-    // Send local endpoint to init.
-    // TODO: Use proper protocol.
-    error = lmp_ep_send1 (cap_initep, LMP_SEND_FLAGS_DEFAULT, init_channel -> local_cap, AOS_PING);
-
-    // Wait for init to acknowledge receiving the endpoint.
-    error = event_dispatch (get_default_waitset());
-
     // Tell init endpoint the new local endpoint.
-    error = aos_connection_init (init_channel);
+    errval_t error = aos_rpc_init (aos_rpc_get_init_channel(), cap_initep);
 
+    if (err_is_fail (error)) {
+        debug_printf ("FATAL: Failed to connect to init!\n");
+        abort();
+    }
+
+    // At this point we can test our channel with a ping.
+    aos_ping (aos_rpc_get_init_channel(), 42);
 
     // STEP 5: now we should have a channel with init set up and can
     // use it for the ram allocator
 
+    // NOTE: Uncomment this as soon as the RAM server is on its own thread or domain.
 //     struct capref ram_server_endpoint = NULL_CAP;
-
-    // TODO: find out why aos_find_service doesn't work.
 //     error = aos_find_service (aos_service_ram, &ram_server_endpoint);
-//     ram_server_endpoint = cap_initep;
+//     static stuct aos_rpc ram_channel;
+//     error = aos_rpc_init (&ram_channel, ram_server_endpoint);
+//     ram_server_connection = &ram_channel;
+    ram_server_connection = aos_rpc_get_init_channel ();
 
-//     error = aos_rpc_init (&ram_server_connection, ram_server_endpoint);
-    ram_server_connection.channel = bootstrap_channel;
-
+    // Change ram allocation to use the IPC mechanism.
     error = ram_alloc_set (ram_alloc_ipc);
-
-    // Test routing
-    struct capref test_thread;
-    error = aos_find_service (aos_service_test, &test_thread);
-    struct lmp_chan test;
-    lmp_chan_init (&test);
-    lmp_chan_accept (&test, DEFAULT_LMP_BUF_WORDS, test_thread);
-    lmp_ep_send1 (test_thread, LMP_SEND_FLAGS_DEFAULT, test.local_cap, AOS_PING);
-    error = lmp_chan_register_recv (&test, get_default_waitset(), MKCLOSURE (test_handler, &test));
-    error = event_dispatch (get_default_waitset());
-    debug_printf ("aos_find_service: %s\n", err_getstring (error));
-
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here

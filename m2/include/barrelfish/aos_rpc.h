@@ -33,7 +33,6 @@ enum aos_service {
 // The first argument is the type of message.
 // If there's a reply, the first argument is an errval_t. // TODO: this is currently not always implemented.
 
-
 /**
  * Do a small exchange for testing purposes.
  *
@@ -59,26 +58,51 @@ enum aos_service {
 /**
  * Find endpoint capability of a service.
  *
- * Type: Synchronous
- * Target: init
- * Send Args: service identifier
- * Send Capability: endpoint where to send reply to
- * Receive Args: error code //TODO
- * Receive Capability: endpoint capability of specified service
- */
-#define INIT_FIND_SERVICE 2
-
-/**
- * Connect to a domain
+ * NOTE: Internally this request triggers
+ * an AOS_ROUTE_REQUEST_EP
  *
  * Type: Synchronous
- * Target: public endpoint of a service provider
- * Send Args: -
- * Send Capability: endpoint of connection initiator
- * Receive Args: error code // TODO
- * Receive Capability: (private) endpoint of service provider
+ * Target: init
+ * Send Args: Service identifier
+ * Send Capability: -
+ * Receive Args: Error code
+ * Receive Capability: endpoint capability of specified service
  */
-#define AOS_RPC_CONNECT 3
+#define AOS_ROUTE_FIND_SERVICE 9
+
+
+/**
+ * Get a new endpoint from a known service.
+ *
+ * NOTE: This request is special:
+ * Due to the fact that the response is handled
+ * by init, the response message is an AOS_ROUTE_DELIVER_EP
+ * and therefore has a message type identifier.
+ *
+ * Target: A registered server.
+ * Source: Only init
+ * Send Args: identifier (~cookie)
+ * Send Capability: -
+ * Receive Args: AOS_ROUTE_DELIVER_EP, error code, identifier
+ * Receive Capability: Newly created endpoint
+ */
+#define AOS_ROUTE_REQUEST_EP 10
+
+/**
+ * Deliver an endpoint to the correct target.
+ *
+ * NOTE: This message is sent
+ * after an AOS_ROUTE_REQUEST_EP.
+ *
+ * Target: init
+ * Source: A registered server
+ * Send Args: error code, identifier
+ * Send Capability: A newly created endpoint.
+ *
+ * Response: None (The message will be
+ * used as a response to AOS_ROUTE_FIND_SERVICE)
+ */
+#define AOS_ROUTE_DELIVER_EP 11
 
 /**
  * Get a RAM capability.
@@ -107,7 +131,7 @@ enum aos_service {
 /**
  * Send a character to be printed by the UART driver.
  *
- * Type: Synchronous
+ * Type: Asynchronous // TODO: shall we wait for acknowledgement?
  * Target: Serial driver
  * Send Args: a character
  * Send Capability: -
@@ -140,30 +164,31 @@ enum aos_service {
  */
 #define AOS_RPC_CONNECTION_INIT 8
 
-#define AOS_ROUTE_FIND_SERVICE 9
-#define AOS_ROUTE_REQUEST_EP 10
-#define AOS_ROUTE_DELIVER_EP 11
 
 enum rpc_datatype {
     UNDEFINED = 0,
     NT_STRING = 1
 };
 
-enum rpc_state {
-    RPC_STATE_DISCONNECTED = 0,
-    RPC_STATE_READY,
-    RPC_STATE_WAITING
-};
+// enum rpc_state {
+//     RPC_STATE_DISCONNECTED = 0,
+//     RPC_STATE_READY,
+//     RPC_STATE_WAITING
+// };
 
 struct aos_rpc {
     struct lmp_chan channel;
-    enum rpc_state state; // not sure if needed...
+//     enum rpc_state state; // not sure if needed...
 
-    struct capref       target   ;
-    enum   rpc_datatype data_type;
+//     struct capref       target   ;
+//     enum   rpc_datatype data_type;
     
     // TODO: add state for your implementation
 };
+
+struct aos_rpc* aos_rpc_get_init_channel (void);
+
+//NOTE: Start of protected API
 
 /**
  * \brief send a string over the given channel
@@ -299,11 +324,14 @@ errval_t aos_rpc_create(struct aos_rpc *chan, char *path, int *fd);
  */
 errval_t aos_rpc_delete(struct aos_rpc *chan, char *path);
 
+///NOTE: End of protected API.
+
 /**
  * \brief Initialize given rpc channel.
  * TODO: you may want to change the inteface of your init function
  */
-errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver); // TODO:
+errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver);
+
 
 /**
  * \brief Find the endpoint for the domain which provides the specified service.
@@ -322,6 +350,6 @@ errval_t aos_connection_init (struct lmp_chan* channel);
 /**
  * Ping a domain.
  */
-errval_t aos_ping (struct lmp_chan* channel, uint32_t value);
+errval_t aos_ping (struct aos_rpc* channel, uint32_t value);
 
 #endif // _LIB_BARRELFISH_AOS_MESSAGES_H

@@ -38,7 +38,15 @@ static inline void print_error (errval_t error, char* fmt, ...)
     }
 }
 
-extern struct lmp_chan bootstrap_channel; // TODO: Somehow provide a better access to it.
+/// The first LMP channel to init which every domain gets.
+// NOTE: We can't use malloc here, because the initial ram allocator
+// only allows frames of one page size, and our paging code doesn't allow this.
+static struct aos_rpc init_channel;
+
+struct aos_rpc* aos_rpc_get_init_channel (void)
+{
+    return &init_channel;
+}
 
 /**
  * Support structure to store arguments in receive handler.
@@ -152,12 +160,10 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 
     errval_t error = SYS_ERR_INVARGS_SYSCALL;
 
-    if ((chan != NULL) && (chan->data_type == UNDEFINED)) {
+    if (chan != NULL) {
         bool finished = false;
         int  indx = 0;
 
-        chan->data_type = NT_STRING;
-	
         for (; finished == false ;) {
             uint32_t buf[LMP_MSG_LENGTH] = {AOS_RPC_SEND_STRING,0,0,0,0,0,0,0,0};
 	
@@ -268,6 +274,7 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc)
 errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c)
 {
     // Send a character to the serial port.
+    // TODO: Shall we change the protocol to wait for acknowledgement?
     struct lmp_chan* channel = &chan->channel;
 
     uint32_t flags = LMP_FLAG_SYNC | LMP_FLAG_YIELD;
@@ -357,13 +364,11 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
     } else {
         // Provide a new set of message arguments.
         struct lmp_message_args my_args;
-        init_lmp_message_args (&my_args, &bootstrap_channel);
+        init_lmp_message_args (&my_args, &(aos_rpc_get_init_channel()->channel));
 
         // Set up the arguments according to IPC convention.
-//         my_args.message.words [0] = INIT_FIND_SERVICE;
         my_args.message.words [0] = AOS_ROUTE_FIND_SERVICE;
         my_args.message.words [1] = service;
-//         my_args.cap = my_args.channel -> local_cap;
 
         // Do the actual IPC call.
         error = aos_send_receive (&my_args, true);
@@ -372,9 +377,10 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
         // Set the result parameter.
         if (err_is_ok (error)) {
             error = my_args.message.words [0];
-            *endpoint = my_args.cap;
-
-            error = lmp_chan_alloc_recv_slot (my_args.channel); // TODO; better error handling
+            if (err_is_ok (error)) {
+                *endpoint = my_args.cap;
+                error = lmp_chan_alloc_recv_slot (my_args.channel);
+            }
         }
     }
     print_error (error, "aos_find_service:%s\n", err_getstring (error));
@@ -382,10 +388,11 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
 }
 
 
-errval_t aos_ping (struct lmp_chan* channel, uint32_t value)
+errval_t aos_ping (struct aos_rpc* chan, uint32_t value)
 {
     debug_printf_quiet ("aos_ping, channel %p...\n", channel);
 
+    struct lmp_chan* channel = &chan->channel;
     // Provide a set of message arguments.
     struct lmp_message_args args;
     init_lmp_message_args (&args, channel);
@@ -407,11 +414,13 @@ errval_t aos_ping (struct lmp_chan* channel, uint32_t value)
 
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 {
-    // Open a new, persistent channel to "receiver" and store the result in "rpc".
+    // Initialize channel to receiver.
+    // NOTE: We assume that the receiver is ready to accept messages, but doesn't
+    // know our communication endpoint yet.
 
     struct lmp_chan* channel = &rpc->channel;
     lmp_chan_init (channel);
-    debug_printf ("Creating new channel %p from bootstrap channel %p\n", channel, &bootstrap_channel);
+    debug_printf ("Initializing channel %p\n", channel);
 
     // Provide a new set of message arguments.
     struct lmp_message_args args;
@@ -422,37 +431,19 @@ errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
     print_error (error, "aos_rpc_init: created local endpoint. %s\n", err_getstring (error));
 
     if (err_is_ok (error)) {
-
         // Reserve a slot for incoming messages.
         error = lmp_chan_alloc_recv_slot (channel);
         print_error (error, "aos_rpc_init: allocating receive slot. %s\n", err_getstring (error));
     }
 
-
     if (err_is_ok (error)) {
-        // Provide the local endpoint to service provider.
-        args.cap = channel -> local_cap;
-        args.message.words [0] = AOS_RPC_CONNECT;
-
-        // Do the actual IPC call.
-        error = aos_send_receive (&args, true);
-        print_error (error, "aos_rpc_init: established connection. %s\n", err_getstring (error));
+        error = aos_connection_init (channel);
     }
 
-    if (err_is_ok (error)) {
-        // Update the channel with the server-provided endpoint.
-        rpc -> channel.remote_cap = args.cap;
-    } else {
-        // Something went wrong somewhere. Perform cleanup.
+    if (err_is_fail (error)) {
         lmp_chan_destroy (channel);
+        debug_printf ("Error in aos_rpc_init: %s\n", err_getstring (error));
     }
-
-    // TODO: remove when strings are integrated.
-    if (rpc != NULL) {
-        rpc->target    = receiver ;
-        rpc->data_type = UNDEFINED;
-    }
-
     return error;
 }
 

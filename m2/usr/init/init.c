@@ -111,51 +111,6 @@ static void recv_handler (void *arg)
             lmp_chan_set_recv_slot (lc, cap);
             debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
             break;
-
-        case INIT_FIND_SERVICE:;
-            // Get the endpoint capability to a service.
-            // TODO: check validity.
-            uint32_t requested_service = msg.words [1];
-
-            // debug_printf ("Requested service: %u\n", requested_service);
-
-            // TODO<-done: Find out why lookup for services[0] == cap_initep fails.
-
-            // TODO: Apparently an endpoint can only connect to exactly one other endpoint.
-            // Therefore we need to change this function: init has to request a new endpoint
-            // at the service provider and later send it back to first domain.
-
-            // This can be done at a later point however... For now we could just implement
-            // all services in init and handle them in this global request handler.
-//             lmp_ep_send0 (cap, 0, services [requested_service]);
-            lmp_ep_send1 (services [requested_service]->remote_cap, 0, services [requested_service]->local_cap, AOS_PING);
-            lmp_ep_send0 (cap, 0, NULL_CAP);
-
-            // Delete capability and reuse slot.
-            cap_delete (cap);
-            lmp_chan_set_recv_slot (lc, cap);
-            debug_printf ("Handled INIT_FIND_SERVICE\n");
-            break;
-
-        case AOS_RPC_CONNECT:;
-            // Create a new channel.
-            struct lmp_chan* new_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
-            lmp_chan_init (new_channel);
-
-            // Set up channel for receiving.
-            err = lmp_chan_accept (new_channel, DEFAULT_LMP_BUF_WORDS, cap);
-            err = lmp_chan_alloc_recv_slot (new_channel);
-
-            // Register a receive handler for the new channel.
-            // TODO: maybe also use a different receive handler for connected clients.
-            err = lmp_chan_register_recv (new_channel, get_default_waitset(), MKCLOSURE (recv_handler, new_channel));
-
-            // Need to allocate a new slot for the main channel.
-            err = lmp_chan_alloc_recv_slot (lc);
-
-            err = lmp_chan_send2 (new_channel, 0, new_channel -> local_cap, 0, msg.words[1]);
-            debug_printf ("Handled AOS_RPC_CONNECT\n");
-            break;
         case AOS_RPC_GET_RAM_CAP:;
             size_t bits = msg.words [1];
             struct capref ram;
@@ -245,13 +200,13 @@ static void recv_handler (void *arg)
 
 
         case AOS_RPC_SERIAL_PUTCHAR:;
-            debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
+//             debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
             char output_character = msg.words [1];
             uart_putchar (output_character);
-            uart_putchar ('\n');
+//            uart_putchar ('\n');
             break;
         case AOS_RPC_SERIAL_GETCHAR:;
-            debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
+//             debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
             char input_character = uart_getchar ();
             lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
             break;
@@ -270,7 +225,7 @@ static void recv_handler (void *arg)
             // store current channel at ID
             find_request [id] = lc;
             // find correct server channel
-            requested_service = msg.words [1];
+            uint32_t requested_service = msg.words [1];
             struct lmp_chan* serv = services [requested_service];
             // generate AOS_ROUTE_REQUEST_EP request with ID.
             lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
