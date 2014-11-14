@@ -1,0 +1,1277 @@
+diff --git a/aos_env_pub.sh b/aos_env_pub.sh
+new file mode 100644
+index 0000000..562f378
+--- /dev/null
++++ b/aos_env_pub.sh
+@@ -0,0 +1,6 @@
++AOS_PATH=/pub/aos
++ARM_GCC=$AOS_PATH/tools13/arm-2012.03/bin
++GHC=$AOS_PATH/tools13/ghc-7.4.1-pub/ghc-7.4.1/bin
++export PATH=$ARM_GCC:$GHC:$AOS_PATH/tools13/bin:$PATH
++
++export AOS_PATH
+diff --git a/b2/hake/Config.hs b/b2/hake/Config.hs
+new file mode 100644
+index 0000000..d53c3b8
+--- /dev/null
++++ b/b2/hake/Config.hs
+@@ -0,0 +1,302 @@
++--------------------------------------------------------------------------
++-- Copyright (c) 2007-2010, 2012, ETH Zurich.
++-- All rights reserved.
++--
++-- This file is distributed under the terms in the attached LICENSE file.
++-- If you do not find this file, copies can be found by writing to:
++-- ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
++--
++-- Configuration options for Hake
++--
++--------------------------------------------------------------------------
++
++module Config where
++
++import HakeTypes
++import Data.Char
++import qualified Args
++import Data.List
++
++-- update this variable to change behaviour of the provided code depending on
++-- which milestone you're working on.
++milestone :: Integer
++milestone = 3
++
++-- path to source and install directories; these are automatically set by hake.sh at setup time
++source_dir :: String
++-- source_dir = undefined -- (set by hake.sh, see end of file)
++
++install_dir :: String
++-- install_dir = undefined -- (set by hake.sh, see end of file)
++
++-- Set of architectures for which to generate rules
++architectures :: [String]
++-- architectures = undefined -- (set by hake.sh, see end of file)
++
++-- Optimisation flags (-Ox -g etc.) passed to compiler
++cOptFlags :: String
++cOptFlags = "-g -O2"
++
++-- Selects which libc to compile with, "oldc" or "newlib"
++libc :: String
++--libc = "oldc"
++libc = "newlib"
++
++newlib_malloc :: String
++--newlib_malloc = "sbrk"     -- use sbrk and newlib's malloc()
++--newlib_malloc = "dlmalloc" -- use dlmalloc
++newlib_malloc = "oldmalloc"
++
++-- Use a frame pointer
++use_fp :: Bool
++use_fp = True
++
++-- Default timeslice duration in milliseconds
++timeslice :: Integer
++timeslice = 80
++
++-- Put kernel into microbenchmarks mode
++microbenchmarks :: Bool
++microbenchmarks = False
++
++-- Enable tracing
++trace :: Bool
++trace = False
++
++-- Enable QEMU networking. (ie. make network work in small memory)
++support_qemu_networking :: Bool
++support_qemu_networking  = False
++
++-- armv7 platform to build for
++-- Currently available: gem5, pandaboard
++armv7_platform :: String
++-- armv7_platform = "gem5"
++armv7_platform = "pandaboard"
++
++-- enable network tracing
++trace_network_subsystem :: Bool
++trace_network_subsystem = False
++
++-- May want to disable LRPC to improve trace visuals
++trace_disable_lrpc :: Bool
++trace_disable_lrpc = False
++
++-- use Kaluga
++use_kaluga_dvm :: Bool
++use_kaluga_dvm = True
++
++-- Domain and driver debugging
++global_debug :: Bool
++global_debug = False
++
++e1000n_debug :: Bool
++e1000n_debug = False
++
++eMAC_debug :: Bool
++eMAC_debug = False
++
++rtl8029_debug :: Bool
++rtl8029_debug = False
++
++ahcid_debug :: Bool
++ahcid_debug = False
++
++libahci_debug :: Bool
++libahci_debug = False
++
++vfs_debug :: Bool
++vfs_debug = False
++
++ethersrv_debug :: Bool
++ethersrv_debug = False
++
++netd_debug :: Bool
++netd_debug = False
++
++libacpi_debug :: Bool
++libacpi_debug = False
++
++acpi_interface_debug :: Bool
++acpi_interface_debug = False
++
++lpc_timer_debug :: Bool
++lpc_timer_debug = False
++
++lwip_debug :: Bool
++lwip_debug = False
++
++libpci_debug :: Bool
++libpci_debug = False
++
++usrpci_debug :: Bool
++usrpci_debug = False
++
++timer_debug :: Bool
++timer_debug = False
++
++eclipse_kernel_debug :: Bool
++eclipse_kernel_debug = False
++
++skb_debug :: Bool
++skb_debug = False
++
++skb_client_debug :: Bool
++skb_client_debug = False
++
++flounder_debug :: Bool
++flounder_debug = False
++
++flounder_failed_debug :: Bool
++flounder_failed_debug = False
++
++webserver_debug :: Bool
++webserver_debug = False
++
++sqlclient_debug :: Bool
++sqlclient_debug = False
++
++sqlite_debug :: Bool
++sqlite_debug = False
++
++sqlite_backend_debug :: Bool
++sqlite_backend_debug = False
++
++nfs_debug :: Bool
++nfs_debug = False
++
++rpc_debug :: Bool
++rpc_debug = False
++
++loopback_debug :: Bool
++loopback_debug = False
++
++octopus_debug :: Bool
++octopus_debug = False
++
++-- Deadlock debugging
++debug_deadlocks :: Bool
++debug_deadlocks = False
++
++-- Partitioned memory server
++memserv_percore :: Bool
++memserv_percore = False
++
++-- Lazy THC implementation (requires use_fp = True)
++lazy_thc :: Bool
++lazy_thc | elem "armv7" architectures  = False
++         | otherwise                   = True
++
++-- Select remote cap database implementation
++data Rcap_db = RCAP_DB_NULL | RCAP_DB_CENTRAL | RCAP_DB_TWOPC deriving (Show,Eq)
++rcap_db :: Rcap_db
++rcap_db = RCAP_DB_NULL
++
++-- Select scheduler
++data Scheduler = RBED | RR deriving (Show,Eq)
++scheduler :: Scheduler
++scheduler = RBED
++
++-- Physical Address Extensions (PAE)-enabled paging on x86-32
++pae_paging :: Bool
++pae_paging = False
++
++-- Page Size Extensions (PSE)-enabled paging on x86-32
++-- Always enabled when pae_paging == True, regardless of value
++pse_paging :: Bool
++pse_paging = False
++
++-- No Execute Extensions (NXE)-enabled paging on x86-32
++-- May not be True when pae_paging == False
++nxe_paging :: Bool
++nxe_paging = False
++
++oneshot_timer :: Bool
++oneshot_timer = False
++
++defines :: [RuleToken]
++defines = [ Str ("-D" ++ d) | d <- [
++             if microbenchmarks then "CONFIG_MICROBENCHMARKS" else "",
++             if trace then "CONFIG_TRACE" else "",
++             if support_qemu_networking then "CONFIG_QEMU_NETWORK" else "",
++             if trace_network_subsystem then "NETWORK_STACK_TRACE" else "",
++             if trace_disable_lrpc then "TRACE_DISABLE_LRPC" else "",
++             if global_debug then "GLOBAL_DEBUG" else "",
++             if e1000n_debug then "E1000N_SERVICE_DEBUG" else "",
++             if ahcid_debug then "AHCI_SERVICE_DEBUG" else "",
++             if libahci_debug then "AHCI_LIB_DEBUG" else "",
++             if vfs_debug then "VFS_DEBUG" else "",
++             if eMAC_debug then "EMAC_SERVICE_DEBUG" else "",
++             if rtl8029_debug then "RTL8029_SERVICE_DEBUG" else "",
++             if ethersrv_debug then "ETHERSRV_SERVICE_DEBUG" else "",
++             if netd_debug then "NETD_SERVICE_DEBUG" else "",
++             if libacpi_debug then "ACPI_DEBUG_OUTPUT" else "",
++             if acpi_interface_debug then "ACPI_BF_DEBUG" else "",
++             if lpc_timer_debug then "LPC_TIMER_DEBUG" else "",
++             if lwip_debug then "LWIP_BARRELFISH_DEBUG" else "",
++             if libpci_debug then "PCI_CLIENT_DEBUG" else "",
++             if usrpci_debug then "PCI_SERVICE_DEBUG" else "",
++             if timer_debug then "TIMER_CLIENT_DEBUG" else "",
++             if eclipse_kernel_debug then "ECLIPSE_KERNEL_DEBUG" else "",
++             if skb_debug then "SKB_SERVICE_DEBUG" else "",
++             if skb_client_debug then "SKB_CLIENT_DEBUG" else "",
++             if flounder_debug then "FLOUNDER_DEBUG" else "",
++             if flounder_failed_debug then "FLOUNDER_FAILED_DEBUG" else "",
++             if webserver_debug then "WEBSERVER_DEBUG" else "",
++             if sqlclient_debug then "SQL_CLIENT_DEBUG" else "",
++             if sqlite_debug then "SQL_SERVICE_DEBUG" else "",
++             if sqlite_backend_debug then "SQL_BACKEND_DEBUG" else "",
++             if nfs_debug then "NFS_CLIENT_DEBUG" else "",
++             if rpc_debug then "RPC_DEBUG" else "",
++             if loopback_debug then "LOOPBACK_DEBUG" else "",
++             if octopus_debug then "DIST_SERVICE_DEBUG" else "",
++             if debug_deadlocks then "CONFIG_DEBUG_DEADLOCKS" else "",
++             if memserv_percore then "CONFIG_MEMSERV_PERCORE" else "",
++             if lazy_thc then "CONFIG_LAZY_THC" else "",
++             if pae_paging then "CONFIG_PAE" else "",
++             if pse_paging then "CONFIG_PSE" else "",
++             if nxe_paging then "CONFIG_NXE" else "",
++             if libc == "oldc" then "CONFIG_OLDC" else "CONFIG_NEWLIB",
++             if oneshot_timer then "CONFIG_ONESHOT_TIMER" else "",
++             if use_kaluga_dvm then "USE_KALUGA_DVM" else "",
++             "MILESTONE="++(show milestone)
++             ], d /= "" ]
++
++-- Sets the include path for the libc
++libcInc :: String
++libcInc = if libc == "oldc" then "/include/oldc"
++          else "/lib/newlib/newlib/libc/include"
++
++-- some defines depend on the architecture/compile options
++arch_defines :: Options -> [RuleToken]
++arch_defines opts
++    -- enable config flags for interconnect drivers in use for this arch
++    = [ Str ("-D" ++ d)
++       | d <- ["CONFIG_INTERCONNECT_DRIVER_" ++ (map toUpper n)
++               | n <- optInterconnectDrivers opts]
++      ]
++    -- enable config flags for flounder backends in use for this arch
++    ++ [ Str ("-D" ++ d)
++       | d <- ["CONFIG_FLOUNDER_BACKEND_" ++ (map toUpper n)
++               | n <- optFlounderBackends opts]
++      ]
++
++-- newlib common compile flags (maybe put these in a config.h file?)
++newlibAddCFlags :: [String]
++newlibAddCFlags = [ "-DPACKAGE_NAME=\"newlib\"" ,
++                    "-DPACKAGE_TARNAME=\"newlib\"",
++                    "-DPACKAGE_VERSION=\"1.19.0\"",
++                    "-DPACKAGE_BUGREPORT=\"\"",
++                    "-DPACKAGE_URL=\"\"",
++                    "-D_I386MACH_ALLOW_HW_INTERRUPTS",
++                    "-DMISSING_SYSCALL_NAMES",
++                    "-D_WANT_IO_C99_FORMATS",
++                    "-D_COMPILING_NEWLIB",
++                    "-D_WANT_IO_LONG_LONG",
++                    "-D_WANT_IO_LONG_DOUBLE",
++                    "-D_MB_CAPABLE",
++                    "-D__BSD_VISIBLE"]
++
++-- Automatically added by hake.sh. Do NOT copy these definitions to the defaults
++source_dir = "../m2/"
++architectures = [ "armv7" ]
++install_dir = "."
+diff --git a/b2/menu.lst.pandaboard b/b2/menu.lst.pandaboard
+new file mode 100644
+index 0000000..79c85a7
+--- /dev/null
++++ b/b2/menu.lst.pandaboard
+@@ -0,0 +1,16 @@
++timeout 0
++
++#
++# This script is used to describe the commands to start at
++# boot-time and the arguments they should receive.
++#
++
++title  AOS Barrelfish
++#root  (nd)
++kernel /armv7/sbin/cpu_omap44xx loglevel=4
++module /armv7/sbin/cpu_omap44xx
++module  /armv7/sbin/init
++module  /armv7/sbin/memeater
++
++# For pandaboard, use following values.
++mmap map 0x80000000 0x40000000 1
+diff --git a/b2/symbolic_targets.mk b/b2/symbolic_targets.mk
+new file mode 100644
+index 0000000..ba39125
+--- /dev/null
++++ b/b2/symbolic_targets.mk
+@@ -0,0 +1,559 @@
++##########################################################################
++# Copyright (c) 2009-2013 ETH Zurich.
++# All rights reserved.
++#
++# This file is distributed under the terms in the attached LICENSE file.
++# If you do not find this file, copies can be found by writing to:
++# ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
++#
++# This file defines symbolic (i.e. non-file) targets for the Makefile
++# generated by Hake.  Edit this to add your own symbolic targets.
++#
++##########################################################################
++
++# Disable built-in implicit rules. GNU make adds environment's MAKEFLAGS too.
++MAKEFLAGS=r
++
++# Explicitly disable the flex and bison implicit rules
++%.c : %.y
++
++%.c : %.l
++
++# Set default architecture to the first specified by Hake in generated Makefile.
++ARCH ?= $(word 1, $(HAKE_ARCHS))
++ARM_GCC?=arm-none-linux-gnueabi-gcc
++
++# All binaries of the RCCE LU benchmark
++BIN_RCCE_LU= \
++   sbin/rcce_lu_A1 \
++   sbin/rcce_lu_A2 \
++   sbin/rcce_lu_A4 \
++   sbin/rcce_lu_A8 \
++   sbin/rcce_lu_A16 \
++   sbin/rcce_lu_A32 \
++   sbin/rcce_lu_A64
++
++# All binaries of the RCCE BT benchmark
++BIN_RCCE_BT= \
++   sbin/rcce_bt_A1 \
++   sbin/rcce_bt_A4 \
++   sbin/rcce_bt_A9  \
++   sbin/rcce_bt_A16 \
++   sbin/rcce_bt_A25 \
++   sbin/rcce_bt_A36
++
++# Default list of modules to build/install for all enabled architectures
++MODULES_COMMON= \
++   sbin/init_null \
++   sbin/init \
++   sbin/chips \
++   sbin/skb \
++   sbin/spawnd \
++   sbin/startd \
++   sbin/flounder_stubs_empty_bench \
++   sbin/flounder_stubs_buffer_bench \
++   sbin/flounder_stubs_payload_bench \
++   sbin/hellotest \
++   sbin/mem_serv \
++   sbin/idctest \
++   sbin/memtest \
++   sbin/fread_test \
++   sbin/fscanf_test \
++   sbin/monitor \
++   sbin/ramfsd \
++   sbin/channel_cost_bench \
++   sbin/schedtest \
++   sbin/testerror \
++   sbin/yield_test \
++   sbin/xcorecap \
++   sbin/xcorecapserv \
++   sbin/xcorecapbench \
++
++# List of modules that are arch-independent and always built
++MODULES_GENERIC= \
++   skb_ramfs.cpio.gz \
++
++# x86_64-specific modules to build by default
++# this should shrink as targets are ported and move into the generic list above
++MODULES_x86_64= \
++   sbin/cpu \
++   sbin/mdbtest_range_query \
++   sbin/mdbtest_addr_zero \
++   sbin/mdb_bench \
++   sbin/mdb_bench_old \
++   sbin/ahci_bench \
++   sbin/ata_rw28_test \
++   sbin/apicdrift_bench \
++   sbin/bench \
++   sbin/bfscope \
++   sbin/bomp_benchmark_cg \
++   sbin/bomp_benchmark_ft \
++   sbin/bomp_benchmark_is \
++   sbin/bomp_sync \
++   sbin/bomp_cpu_bound \
++   sbin/bomp_cpu_bound_progress \
++   sbin/bomp_sync_progress \
++   sbin/bomp_test \
++   sbin/boot_perfmon \
++   sbin/bulkbench \
++   sbin/datagatherer \
++   sbin/ahcid \
++   sbin/e1000n \
++   sbin/NGD_mng \
++   sbin/e10k \
++   sbin/rtl8029 \
++   sbin/netd \
++   sbin/echoserver \
++   sbin/elver \
++   sbin/fbdemo \
++   sbin/fish \
++   sbin/fputest \
++   sbin/hpet \
++   sbin/lpc_kbd \
++   sbin/lpc_timer \
++   sbin/lrpc_bench \
++   sbin/mem_affinity \
++   sbin/mem_serv_dist \
++   sbin/net-test \
++   sbin/netthroughput \
++   sbin/pci \
++        sbin/acpi \
++        sbin/kaluga \
++   sbin/placement_bench \
++   sbin/phases_bench \
++   sbin/phases_scale_bench \
++   sbin/phoenix_kmeans \
++   $(BIN_RCCE_BT) \
++   $(BIN_RCCE_LU) \
++   sbin/rcce_pingpong \
++   sbin/serial \
++   sbin/shared_mem_clock_bench \
++   sbin/sif \
++   sbin/slideshow \
++   sbin/spantest \
++   sbin/testconcurrent \
++   sbin/thc_v_flounder_empty \
++   sbin/thcidctest \
++   sbin/thcminitest \
++   sbin/thctest \
++   sbin/tsc_bench \
++   sbin/tweedtest \
++   sbin/udp_throughput \
++   sbin/ump_latency \
++   sbin/ump_exchange \
++   sbin/ump_latency_cache \
++   sbin/ump_throughput \
++   sbin/ump_send \
++   sbin/ump_receive \
++   sbin/vbe \
++   sbin/vmkitmon \
++   sbin/webserver \
++   sbin/tlstest \
++   sbin/timer_test \
++   sbin/net_openport_test \
++   sbin/perfmontest \
++   sbin/routing_setup \
++   sbin/multihoptest \
++   sbin/multihop_latency_bench \
++   sbin/cryptotest \
++   $(BIN_CONSENSUS) \
++   sbin/bcached \
++   sbin/testdesc \
++   sbin/testdesc-child \
++   sbin/lshw \
++
++# the following are broken in the newidc system
++MODULES_x86_64_broken= \
++   sbin/barriers \
++   sbin/driver_msd \
++   sbin/ehci \
++   sbin/ipi_bench \
++   sbin/ring_barriers \
++   sbin/usb_manager \
++   sbin/ssf_bcast \
++   sbin/lamport_bcast \
++
++# x86-32-specific module to build by default
++MODULES_x86_32=\
++   sbin/cpu \
++   sbin/lpc_kbd \
++   sbin/serial \
++   $(BIN_RCCE_BT) \
++   $(BIN_RCCE_LU) \
++   sbin/rcce_pingpong \
++   sbin/bench \
++   sbin/fbdemo \
++   sbin/fish \
++   sbin/fputest \
++   sbin/pci \
++        sbin/acpi \
++        sbin/kaluga \
++   sbin/slideshow \
++   sbin/thc_v_flounder_empty \
++   sbin/thcidctest \
++   sbin/thcminitest \
++   sbin/thctest \
++   sbin/vbe \
++   sbin/mem_serv_dist \
++   sbin/routing_setup \
++   sbin/multihoptest \
++   sbin/multihop_latency_bench \
++
++# SCC-specific module to build by default
++MODULES_scc=\
++   sbin/cpu \
++   $(BIN_RCCE_BT) \
++   $(BIN_RCCE_LU) \
++   sbin/rcce_pingpong \
++   sbin/bench \
++   sbin/eMAC \
++   sbin/netd \
++   sbin/NGD_mng \
++   sbin/webserver \
++   sbin/ipirc_test \
++   sbin/thc_v_flounder_empty \
++   sbin/thcidctest \
++   sbin/thcminitest \
++   sbin/thctest \
++   sbin/mem_serv_dist \
++   sbin/net-test \
++   sbin/netthroughput \
++   sbin/udp_throughput \
++
++# ARM-specific modules to build by default
++MODULES_armv5=\
++   sbin/cpu \
++   sbin/cpu.bin
++
++# XScale-specific modules to build by default
++MODULES_xscale=\
++   sbin/cpu_ixp2800 \
++   sbin/cpu_ixp2800.bin
++
++# ARMv7-specific modules to build by default
++# XXX: figure out armv7 default
++MODULES_armv7=\
++   sbin/cpu_omap44xx
++
++# ARM11MP-specific modules to build by default
++MODULES_arm11mp=\
++   sbin/cpu \
++   sbin/cpu.bin
++
++# construct list of all modules to be built (arch-specific and common for each arch)
++MODULES=$(foreach a,$(HAKE_ARCHS),$(foreach m,$(MODULES_$(a)),$(a)/$(m)) \
++                                  $(foreach m,$(MODULES_COMMON),$(a)/$(m))) \
++        $(MODULES_GENERIC)
++
++all: $(MODULES) menu.lst
++   @echo "You've just run the default ("all") target for Barrelfish"
++   @echo "using Hake.  The following modules have been built:"
++   @echo $(MODULES)
++   @echo "If you want to change this target, edit the file called"
++   @echo "'symbolic_targets.mk' in your build directory."
++.PHONY: all
++
++# XXX: this should be overridden in some local settings file?
++INSTALL_PREFIX ?= /home/netos/tftpboot/$(USER)
++
++# Only install a binary if it doesn't exist in INSTALL_PREFIX or the modification timestamp differs
++install: $(MODULES)
++   for m in ${MODULES}; do \
++     if [ ! -f ${INSTALL_PREFIX}/$$m ] || \
++         [ $$(stat -c%Y $$m) -ne $$(stat -c%Y ${INSTALL_PREFIX}/$$m) ]; then \
++       echo Installing $$m; \
++       mkdir -p ${INSTALL_PREFIX}/$$(dirname $$m); \
++       install -p $$m ${INSTALL_PREFIX}/$$m; \
++     fi; \
++   done;
++.PHONY : install
++
++sim: simulate
++.PHONY : sim
++
++QEMU=unknown-arch-error
++GDB=unknown-arch-error
++CLEAN_HD=
++
++DISK=hd.img
++AHCI=-device ahci,id=ahci -device ide-drive,drive=disk,bus=ahci.0 -drive id=disk,file=$(DISK),if=none
++
++ifeq ($(ARCH),x86_64)
++        QEMU_CMD=qemu-system-x86_64 -no-kvm -smp 2 -m 1024 -net nic,model=ne2k_pci -net user $(AHCI) -fda $(SRCDIR)/tools/grub-qemu.img -tftp $(PWD) -nographic
++   GDB=x86_64-pc-linux-gdb
++   CLEAN_HD=qemu-img create $(DISK) 10M
++else ifeq ($(ARCH),x86_32)
++        QEMU_CMD=qemu-system-i386 -no-kvm -smp 2 -m 1024 -net nic,model=ne2k_pci -net user -fda $(SRCDIR)/tools/grub-qemu.img -tftp $(PWD) -nographic
++   GDB=gdb
++else ifeq ($(ARCH),scc)
++        QEMU_CMD=qemu-system-i386 -no-kvm -smp 2 -m 1024 -cpu pentium -net nic,model=ne2k_pci -net user -fda $(SRCDIR)/tools/grub-qemu.img -tftp $(PWD) -nographic
++   GDB=gdb
++else ifeq ($(ARCH),armv5)
++   ARM_QEMU_CMD=qemu-system-arm -no-kvm -kernel armv5/sbin/cpu.bin -nographic -no-reboot -m 256 -initrd armv5/romfs.cpio
++   GDB=xterm -e arm-linux-gnueabi-gdb
++simulate: $(MODULES) armv5/romfs.cpio
++   $(ARM_QEMU_CMD)
++.PHONY: simulate
++
++armv5/tools/debug.arm.gdb: $(SRCDIR)/tools/debug.arm.gdb
++   cp $< $@
++
++debugsim: $(MODULES) armv5/romfs.cpio armv5/tools/debug.arm.gdb
++   $(SRCDIR)/tools/debug.sh "$(ARM_QEMU_CMD) -initrd armv5/romfs.cpio" "$(GDB)" "-s $(ARCH)/sbin/cpu -x armv5/tools/debug.arm.gdb $(GDB_ARGS)"
++.PHONY : debugsim
++else ifeq ($(ARCH),arm11mp)
++   QEMU_CMD=qemu-system-arm -no-kvm -cpu mpcore -M realview -kernel arm11mp/sbin/cpu.bin
++   GDB=arm-linux-gnueabi-gdb
++endif
++
++
++ifdef QEMU_CMD
++
++simulate: $(MODULES)
++   $(CLEAN_HD)
++   $(QEMU_CMD)
++.PHONY : simulate
++
++debugsim: $(MODULES)
++   $(CLEAN_HD)
++   $(SRCDIR)/tools/debug.sh "$(QEMU_CMD)" "$(GDB)" "-x $(SRCDIR)/tools/debug.gdb $(GDB_ARGS)" "file:/dev/stdout"
++.PHONY : debugsim
++
++endif
++
++
++
++$(ARCH)/menu.lst: $(SRCDIR)/hake/menu.lst.$(ARCH)
++   cp $< $@
++
++$(ARCH)/romfs.cpio: $(SRCDIR)/tools/arm-mkbootcpio.sh $(MODULES) $(ARCH)/menu.lst
++   $(SRCDIR)/tools/arm-mkbootcpio.sh $(ARCH)/menu.lst $@
++
++# Location of hardcoded size of romfs CPIO image
++arm_romfs_cpio = "$(ARCH)/include/romfs_size.h"
++
++# XXX: Horrid hack to hardcode size of romfs CPIO image into ARM kernel
++# This works in several recursive make steps:
++# 1. Create a dummy romfs_size.h header file
++# 2. Compile everything
++# 3. Create the romfs CPIO image
++# 4. Determine its size and write to romfs_size.h
++# 5. Re-compile kernel (but not the romfs) with correct size information
++# 6. Install romfs to installation location
++arm:
++   $(MAKE)
++   $(MAKE) $(ARCH)/romfs.cpio
++   echo "//Autogenerated size of romfs.cpio because the bootloader cannot calculate it" > $(arm_romfs_cpio)
++   echo "size_t romfs_cpio_archive_size = `ls -asl $(ARCH)/romfs.cpio | sed -e 's/ /\n/g' | head -6 | tail -1`;" >> $(arm_romfs_cpio)
++   $(MAKE)
++.PHONY: arm
++
++# Builds a dummy romfs_size.h
++$(ARCH)/include/romfs_size.h:
++   mkdir -p $(shell dirname $@)
++   echo "size_t romfs_cpio_archive_size = 0; //should not see this" > $@
++
++arminstall:
++   $(MAKE) arm
++   $(MAKE) install
++   install -p $(ARCH)/romfs.cpio ${INSTALL_PREFIX}/$(ARCH)/romfs.cpio
++.PHONY: arminstall
++
++# Copy the scc-specific menu.lst from the source directory to the build directory
++menu.lst.scc: $(SRCDIR)/hake/menu.lst.scc
++   cp $< $@
++
++scc: all tools/bin/dite menu.lst.scc
++   $(shell find scc/sbin -type f -print0 | xargs -0 strip -d)
++   tools/bin/dite -32 -o bigimage.dat menu.lst.scc
++   cp $(SRCDIR)/tools/scc/bootvector.dat .
++   bin2obj -m $(SRCDIR)/tools/scc/bigimage.map -o barrelfish0.obj
++   bin2obj -m $(SRCDIR)/tools/scc/bootvector.map -o barrelfish1.obj
++   @echo Taking the barrelfish.obj files to SCC host
++   scp barrelfish[01].obj user@tomme1.in.barrelfish.org:
++
++# Source indexing targets
++cscope.files:
++   find $(abspath .) $(abspath $(SRCDIR)) -name '*.[ch]' -type f -print | sort | uniq > $@
++.PHONY: cscope.files
++
++cscope.out: cscope.files
++   cscope -k -b -i$<
++
++TAGS: cscope.files
++   etags - < $< # for emacs
++   cat $< | xargs ctags -o TAGS_VI # for vim
++
++# force rebuild of the Makefile
++rehake: ./hake/hake
++   ./hake/hake --source-dir $(SRCDIR)
++.PHONY: rehake
++
++clean::
++   $(RM) -r tools $(HAKE_ARCHS)
++.PHONY: clean
++
++realclean:: clean
++   $(RM) hake/*.o hake/*.hi hake/hake Hakefiles.hs cscope.*
++.PHONY: realclean
++
++# Documentation
++DOCS= \
++   ./docs/TN-000-Overview.pdf \
++   ./docs/TN-001-Glossary.pdf \
++   ./docs/TN-002-Mackerel.pdf \
++   ./docs/TN-003-Hake.pdf \
++   ./docs/TN-004-VirtualMemory.pdf \
++   ./docs/TN-005-SCC.pdf \
++   ./docs/TN-006-Routing.pdf \
++   ./docs/TN-008-Tracing.pdf \
++   ./docs/TN-009-Notifications.pdf \
++   ./docs/TN-010-Spec.pdf \
++   ./docs/TN-011-IDC.pdf \
++   ./docs/TN-012-Services.pdf \
++   ./docs/TN-013-CapabilityManagement.pdf \
++   ./docs/TN-014-bulk-transfer.pdf \
++   ./docs/TN-015-DiskDriverArchitecture.pdf \
++   ./docs/TN-016-Serial.pdf
++
++docs doc: $(DOCS)
++.PHONY: docs doc
++
++clean::
++   $(RM) $(DOCS)
++.PHONY: clean
++
++doxygen: Doxyfile
++   doxygen $<
++.PHONY: doxygen
++
++# pretend to be CMake's CONFIGURE_FILE command
++# TODO: clean this up
++Doxyfile: $(SRCDIR)/doc/Doxyfile.cmake
++   sed -r 's#@CMAKE_SOURCE_DIR@#$(SRCDIR)#g' $< > $@
++
++# Scheduler simulator test cases
++RUNTIME = 1000
++TESTS = $(addsuffix .txt,$(basename $(wildcard $(SRCDIR)/tools/schedsim/*.cfg)))
++
++schedsim-regen: $(TESTS)
++
++$(TESTS): %.txt: %.cfg tools/bin/simulator
++   tools/bin/simulator $< $(RUNTIME) > $@
++
++schedsim-check: $(wildcard $(SRCDIR)/tools/schedsim/*.cfg)
++   for f in $^; do tools/bin/simulator $$f $(RUNTIME) | diff -q - `dirname $$f`/`basename $$f .cfg`.txt || exit 1; done
++
++
++#######################################################################
++#
++# Pandaboard builds
++#
++#######################################################################
++
++# TODO: add different modules here depending on
++# the milestone you're working on
++
++PANDABOARD_MODULES=             \
++   armv7/sbin/cpu_omap44xx \
++   armv7/sbin/init         \
++        armv7/sbin/memeater
++
++menu.lst.pandaboard: $(SRCDIR)/hake/menu.lst.pandaboard
++   cp $< $@
++
++pandaboard_image: $(PANDABOARD_MODULES) \
++       tools/bin/arm_molly \
++       menu.lst.pandaboard
++   # Translate each of the binary files we need
++   $(SRCDIR)/tools/arm_molly/build_data_files.sh menu.lst.pandaboard molly_panda
++   # Generate appropriate linker script
++   cpp -P -DBASE_ADDR=0x82001000 $(SRCDIR)/tools/arm_molly/molly_ld_script.in \
++       molly_panda/molly_ld_script
++   # Build a C file to link into a single image for the 2nd-stage
++   # bootloader
++   tools/bin/arm_molly menu.lst.pandaboard panda_mbi.c
++   # Compile the complete boot image into a single executable
++   $(ARM_GCC) -std=c99 -g -fPIC -pie -Wl,-N -fno-builtin \
++       -nostdlib -march=armv7-a -mapcs -fno-unwind-tables \
++       -Tmolly_panda/molly_ld_script \
++       -I$(SRCDIR)/include \
++       -I$(SRCDIR)/include/arch/arm \
++       -I./armv7/include \
++       -I$(SRCDIR)/include/oldc \
++       -I$(SRCDIR)/include/c \
++       -imacros $(SRCDIR)/include/deputy/nodeputy.h \
++       $(SRCDIR)/tools/arm_molly/molly_boot.S \
++       $(SRCDIR)/tools/arm_molly/molly_init.c \
++       $(SRCDIR)/tools/arm_molly/lib.c \
++       ./panda_mbi.c \
++       $(SRCDIR)/lib/elf/elf32.c \
++       ./molly_panda/* \
++       -o pandaboard_image
++   @echo "OK - pandaboard boot image is built."
++   @echo "If your boot environment is correctly set up, you can now:"
++   @echo "$ usbboot ./pandaboard_image"
++
++########################################################################
++#
++# GEM5 build
++#
++########################################################################
++
++menu.lst.arm_gem5: $(SRCDIR)/hake/menu.lst.arm_gem5
++   cp $< $@
++
++menu.lst.arm_gem5_mc: $(SRCDIR)/hake/menu.lst.arm_gem5_mc
++   cp $< $@
++
++GEM5_MODULES=\
++   armv7/sbin/cpu_arm_gem5 \
++   armv7/sbin/init \
++   armv7/sbin/mem_serv \
++   armv7/sbin/monitor \
++   armv7/sbin/ramfsd \
++   armv7/sbin/spawnd \
++   armv7/sbin/startd \
++   armv7/sbin/skb \
++   armv7/sbin/memtest
++
++
++arm_gem5_image: $(GEM5_MODULES) \
++       tools/bin/arm_molly \
++       menu.lst.arm_gem5
++   # Translate each of the binary files we need
++   $(SRCDIR)/tools/arm_molly/build_data_files.sh menu.lst.arm_gem5 molly_gem5
++   # Generate appropriate linker script
++   cpp -P -DBASE_ADDR=0x00100000 $(SRCDIR)/tools/arm_molly/molly_ld_script.in \
++       molly_gem5/molly_ld_script
++   # Build a C file to link into a single image for the 2nd-stage
++   # bootloader
++   tools/bin/arm_molly menu.lst.arm_gem5 arm_mbi.c
++   # Compile the complete boot image into a single executable
++   $(ARM_GCC) -std=c99 -g -fPIC -pie -Wl,-N -fno-builtin \
++       -nostdlib -march=armv7-a -mapcs -fno-unwind-tables \
++       -Tmolly_gem5/molly_ld_script \
++       -I$(SRCDIR)/include \
++       -I$(SRCDIR)/include/arch/arm \
++       -I./armv7/include \
++       -I$(SRCDIR)/include/oldc \
++       -I$(SRCDIR)/include/c \
++       -imacros $(SRCDIR)/include/deputy/nodeputy.h \
++       $(SRCDIR)/tools/arm_molly/molly_boot.S \
++       $(SRCDIR)/tools/arm_molly/molly_init.c \
++       $(SRCDIR)/tools/arm_molly/lib.c \
++       ./arm_mbi.c \
++       $(SRCDIR)/lib/elf/elf32.c \
++       ./molly_gem5/* \
++       -o arm_gem5_image
++
++# ARM GEM5 Simulation Targets
++ARM_FLAGS=$(SRCDIR)/tools/arm_gem5/gem5script.py --caches --l2cache --n=2 --kernel=arm_gem5_image
++
++arm_gem5: arm_gem5_image $(SRCDIR)/tools/arm_gem5/gem5script.py
++   gem5.fast $(ARM_FLAGS)
++
++arm_gem5_detailed: arm_gem5_image $(SRCDIR)/tools/arm_gem5/gem5script.py
++   gem5.fast $(ARM_FLAGS) --cpu-type=arm_detailed
++
++.PHONY: arm_gem5_mc arm_gem5 arm_gem5_detailed arm_gem5_detailed
+diff --git a/m2/usr/init/terminal.c b/m2/usr/init/terminal.c
+new file mode 100644
+index 0000000..8cce5c8
+--- /dev/null
++++ b/m2/usr/init/terminal.c
+@@ -0,0 +1,130 @@
++#include "ipc_protocol.h"
++#include "init.h"
++
++#include <barrelfish/lmp_chan.h>
++#include <mm/mm.h>
++
++static struct lmp_chan server_channel;
++//static struct lmp_chan uart___channel;
++
++static char buffer[1024];
++static int  pointer      = 0;
++
++static void server_handler(void *arg)
++{
++    struct capref        cap;
++    struct lmp_chan    * lc  = &server_channel  ;
++    struct lmp_recv_msg  msg = LMP_RECV_MSG_INIT;
++
++    errval_t err  = lmp_chan_recv(lc, &msg, &cap);
++    uint32_t type;
++
++    if (err_is_fail(err) && lmp_err_is_transient(err)) {
++        lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++    }
++
++    type = msg.words[0];
++
++    debug_printf ("terminal_thread:S: Have LMP message received - %u\n", type);
++
++    switch (type)
++    {
++        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
++        // otherwise control will be transfered back to sender immediately...
++
++        case AOS_GET_SERVICE:;
++            /*if (msg.words[1] == STATUS_SUCCESS) {
++                debug_printf ("terminal_thread:S: BLA-BLA-BLA");
++
++                debug_printf ("terminal_thread:S: Successfully registered\n", type);
++            }*/
++            break;
++
++        case UART_CONNECT:;
++            /*errval_t status = STATUS_ALREADY_EXIST;
++
++            debug_printf ("terminal_thread:S: UART_CONNECT\n", type);
++
++            if (!capref_is_null(cap))
++            {
++                if (connected == false) {
++                    status = lmp_chan_accept(&client_channel, DEFAULT_LMP_BUF_WORDS, cap);
++                    if (err_is_fail (err)) {
++                        debug_printf ("\tERROR: terminal_thread: failed to accept client LMP channel.\n");
++                    } else {
++                        status = lmp_chan_register_recv(&client_channel, get_default_waitset(), MKCLOSURE(client_handler, NULL));
++                        if (err_is_fail (err)) {
++                            debug_printf ("\tERROR: terminal_thread: failed to register client LMP channel.\n");
++                        } else {
++                            connected = true;
++                        }
++
++                    }
++                }
++
++                lmp_ep_send2(cap, 0, NULL_CAP, UART_CONNECT, status);
++            }*/
++            break;
++
++        case UART_RECV_BYTE:;
++            buffer[pointer] = msg.words[1];
++            pointer++;
++
++            if (msg.words[1] == '\n') {
++                for (int i = 0; buffer[i] != '\n'; i++) {
++                    lmp_ep_send2(cap_initep, 0, NULL_CAP, UART_SEND_BYTE, buffer[i]);
++                }
++
++                pointer = 0;
++            }
++
++            lmp_ep_send1(cap_initep, 0, NULL_CAP, UART_RECV_BYTE);
++            break;
++
++        default:
++            debug_printf ("Got default value\n");
++            if (! capref_is_null (cap)) {
++                cap_delete (cap);
++                lmp_chan_set_recv_slot (lc, cap);
++            }
++    }
++
++    lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++}
++
++int terminal_thread(void* arg)
++{
++    errval_t err;
++
++    // A small test for our separate page fault handler.
++    debug_printf ("terminal_thread: STARTED.\n");
++    // ----------------------------------------------
++
++    err = lmp_chan_accept(&server_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: terminal_thread: failed to accept LMP channel.\n");
++    }
++
++    err = lmp_chan_register_recv(&server_channel, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: terminal_thread: failed to register LMP channel.\n");
++    }
++
++    err = lmp_ep_send2(cap_initep, LMP_SEND_FLAGS_DEFAULT, NULL_CAP/*server_channel.local_cap*/, AOS_GET_SERVICE, SERVICE_UART_DRIVER);
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: terminal_thread: failed to register self in init 0x%x.\n");
++    }
++
++    debug_printf ("\tSUCCESS!\n");
++
++    for (;;) {
++        err = event_dispatch (get_default_waitset());
++        if (err_is_fail (err)) {
++            debug_printf ("\tERROR: terminal_thread: Handling LMP message: %s\n", err_getstring (err));
++        }
++    }
++    // ----------------------------------------------
++    debug_printf ("terminal_thread: FINISHED.\n");
++
++    return EXIT_SUCCESS;
++}
+diff --git a/m2/usr/init/uart_driver.c b/m2/usr/init/uart_driver.c
+new file mode 100644
+index 0000000..eaa69c0
+--- /dev/null
++++ b/m2/usr/init/uart_driver.c
+@@ -0,0 +1,203 @@
++#include "ipc_protocol.h"
++#include "init.h"
++
++#include <barrelfish/lmp_chan.h>
++#include <mm/mm.h>
++
++//static struct lmp_chan client_channel;
++static struct lmp_chan server_channel;
++
++static bool connected = false;
++static bool terminate = false;
++
++static uint32_t dev_base;
++
++/*static void client_handler(void *arg)
++{
++    struct capref        cap;
++    struct lmp_chan    * lc  = &client_channel  ;
++    struct lmp_recv_msg  msg = LMP_RECV_MSG_INIT;
++
++    errval_t err  = lmp_chan_recv(lc, &msg, &cap);
++    uint32_t type;
++
++    if (err_is_fail(err) && lmp_err_is_transient(err)) {
++        lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(client_handler, NULL));
++    }
++
++    type = msg.words[0];
++
++    debug_printf ("uart_driver_thread:c: Have LMP message received - %u\n", type);
++
++    switch (type)
++    {
++        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
++        // otherwise control will be transfered back to sender immediately...
++
++        case UART_DISCONNECT:;
++            debug_printf ("uart_driver_thread: UART_DISCONNECT\n", type);
++
++            lmp_chan_destroy(&client_channel);
++
++            connected = false;
++
++            break;
++
++        case UART_RECV_BYTE:;
++            debug_printf ("uart_driver_thread: UART_RECV_BYTE\n", type);
++            break;
++
++        case UART_SEND_BYTE:;
++            debug_printf ("uart_driver_thread: UART_SEND_BYTE\n", type);
++            break;
++
++        default:
++            debug_printf ("Got default value\n");
++            if (! capref_is_null (cap)) {
++                cap_delete (cap);
++                lmp_chan_set_recv_slot (lc, cap);
++            }
++    }
++
++    lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(client_handler, NULL));
++}*/
++
++static char uart_getchar(void)
++{
++    volatile uint32_t* uart_lsr = (uint32_t*) (dev_base + 0x14);
++    volatile uint32_t* uart_rhr = (uint32_t*) (dev_base       );
++
++    for (; ((*uart_lsr) & 0x01) == 0 ;);
++
++    return *uart_rhr;
++}
++
++static void uart_putchar(char c)
++{
++    volatile uint32_t* uart_lsr = (uint32_t*) (dev_base + 0x14);
++    volatile uint32_t* uart_thr = (uint32_t*) (dev_base       );
++
++    if (c == '\n')
++        uart_putchar('\r');
++
++    for (; ((*uart_lsr) & 0x20) == 0 ;);
++
++    *uart_thr = c;
++}
++
++static void server_handler(void *arg)
++{
++    struct capref        cap;
++    struct lmp_chan    * lc  = &server_channel  ;
++    struct lmp_recv_msg  msg = LMP_RECV_MSG_INIT;
++
++    errval_t err  = lmp_chan_recv(lc, &msg, &cap);
++    uint32_t type;
++
++    if (err_is_fail(err) && lmp_err_is_transient(err)) {
++        lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++    }
++
++    type = msg.words[0];
++
++    debug_printf ("uart_driver_thread:S: Have LMP message received - %u\n", type);
++
++    switch (type)
++    {
++        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
++        // otherwise control will be transfered back to sender immediately...
++
++        case AOS_REGISTRATION_COMPETE:;
++            debug_printf ("uart_driver_thread:S: Have LMP message AOS_REGISTRATION_COMPETE\n");
++                if (msg.words[1] != STATUS_SUCCESS) {
++                terminate = true;
++            } else {
++                dev_base = msg.words[2];
++
++                debug_printf ("uart_driver_thread:S: Successfully registered with addr: %u\n", dev_base);
++            }
++            break;
++
++        case UART_CONNECT:;
++            debug_printf ("uart_driver_thread:S: Have LMP message UART_CONNECT\n");
++
++            connected = true;
++            break;
++
++        case UART_DISCONNECT:;
++            debug_printf ("uart_driver_thread:S: Have LMP message UART_DISCONNECT\n");
++
++            connected = false;
++            break;
++
++        case UART_RECV_BYTE:;
++            debug_printf ("uart_driver_thread:S: Have LMP message UART_RECV_BYTE\n");
++
++            if (connected) {
++                char ch = uart_getchar();
++
++                err = lmp_ep_send2(cap_initep, LMP_SEND_FLAGS_DEFAULT, NULL_CAP, UART_RECV_BYTE, ch);
++                if (err_is_fail (err)) {
++                    debug_printf ("\tERROR: uart_driver_thread: failed to register self in init = 0x%x.\n");
++                }
++            }
++
++            break;
++
++        case UART_SEND_BYTE:;
++            debug_printf ("uart_driver_thread:S: Have LMP message UART_SEND_BYTE\n");
++
++            if (connected) {
++                uart_putchar(msg.words[1]);
++            }
++
++            break;
++
++        default:
++            debug_printf ("Got default value\n");
++            if (! capref_is_null (cap)) {
++                cap_delete (cap);
++                lmp_chan_set_recv_slot (lc, cap);
++            }
++    }
++
++    lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++}
++
++int uart_driver_thread(void* arg)
++{
++    // A small test for our separate page fault handler.
++    debug_printf ("uart_driver_thread: STARTED.\n");
++    // ----------------------------------------------
++
++    errval_t err;
++
++    err = lmp_chan_accept(&server_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: uart_driver_thread: failed to accept LMP channel.\n");
++    }
++
++    err = lmp_chan_register_recv(&server_channel, get_default_waitset(), MKCLOSURE(server_handler, NULL));
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: uart_driver_thread: failed to register LMP channel.\n");
++    }
++
++    err = lmp_ep_send2(cap_initep, LMP_SEND_FLAGS_DEFAULT, server_channel.local_cap, AOS_REGISTER_SERVICE, SERVICE_UART_DRIVER);
++    if (err_is_fail (err)) {
++        debug_printf ("\tERROR: uart_driver_thread: failed to register self in init = 0x%x.\n");
++    }
++
++    debug_printf ("\tSUCCESS!\n");
++
++    for (; terminate == false ;) {
++        err = event_dispatch (get_default_waitset());
++        if (err_is_fail (err)) {
++            debug_printf ("\tERROR: uart_driver_thread: Handling LMP message: %s\n", err_getstring (err));
++        }
++    }
++    // ----------------------------------------------
++    debug_printf ("uart_driver_thread: FINISHED.\n");
++
++    return EXIT_SUCCESS;
++}
++
+diff --git a/m2/usr/init/ipc_protocol.h b/m2/usr/init/ipc_protocol.h
+new file mode 100644
+index 0000000..2cec2d9
+--- /dev/null
++++ b/m2/usr/init/ipc_protocol.h
+@@ -0,0 +1,18 @@
++#ifndef IPC_PROTOCOL_H
++    #define IPC_PROTOCOL_H
++
++    #define AOS_REGISTER_SERVICE        0x00000100
++    #define AOS_REGISTRATION_COMPETE    0x00000101
++    #define AOS_GET_SERVICE             0x00000102
++
++    #define UART_CONNECT                0x00000200
++    #define UART_DISCONNECT             0x00000201
++    #define UART_RECV_BYTE              0x00000202
++    #define UART_SEND_BYTE              0x00000203
++
++
++    #define SERVICE_UART_DRIVER         0x00000100
++
++    #define STATUS_SUCCESS              0x00000000
++    #define STATUS_ALREADY_EXIST        0x00000001
++#endif
+\ No newline at end of file

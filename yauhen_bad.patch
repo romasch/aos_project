@@ -1,0 +1,820 @@
+diff --git a/m2/lib/barrelfish/init.c b/m2/lib/barrelfish/init.c
+index 0bfbcf3..842254a 100644
+--- a/m2/lib/barrelfish/init.c
++++ b/m2/lib/barrelfish/init.c
+@@ -1,10 +1,10 @@
+ /**
+  * \file
+- * \brief Barrelfish library initialization.
++ * \brief init process.
+  */
+ 
+ /*
+- * Copyright (c) 2007, 2008, 2009, 2010, 2011, 2012, 2013 ETH Zurich.
++ * Copyright (c) 2007, 2008, 2009, 2010, ETH Zurich.
+  * All rights reserved.
+  *
+  * This file is distributed under the terms in the attached LICENSE file.
+@@ -12,240 +12,345 @@
+  * ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
+  */
+ 
+-#include <stdio.h>
+-#include <barrelfish/barrelfish.h>
+-#include <barrelfish/idc.h>
+-#include <barrelfish/dispatch.h>
+-#include <barrelfish/curdispatcher_arch.h>
+-#include <barrelfish/dispatcher_arch.h>
+-#include <barrelfish_kpi/dispatcher_shared.h>
+-#include <barrelfish/morecore.h>
+-#include <barrelfish/monitor_client.h>
+-#include <barrelfish/nameservice_client.h>
+-#include <barrelfish/paging.h>
+-#include <barrelfish_kpi/domain_params.h>
+-#include <if/monitor_defs.h>
+-#include <trace/trace.h>
+-#include <octopus/init.h>
+-#include "threads_priv.h"
+ #include "init.h"
++#include <stdlib.h>
++#include <string.h>
++#include <barrelfish/morecore.h>
++#include <barrelfish/dispatcher_arch.h>
++#include <barrelfish/debug.h>
++#include <barrelfish/lmp_chan.h>
+ 
+ #include <barrelfish/aos_rpc.h>
+-// #include <barrelfish/lmp_chan.h>
+ 
+-/// Are we the init domain (and thus need to take some special paths)?
+-static bool init_domain;
++// From Milestone 0...
++#define UART_BASE 0x48020000
++#define UART_SIZE 0x1000
++#define UART_SIZE_BITS 12
+ 
+-extern size_t (*_libc_terminal_read_func)(char *, size_t);
+-extern size_t (*_libc_terminal_write_func)(const char *, size_t);
+-extern void (*_libc_exit_func)(int);
+-extern void (*_libc_assert_func)(const char *, const char *, const char *, int);
++#include <mm/mm.h>
+ 
+-void libc_exit(int);
++struct bootinfo *bi;
++static coreid_t my_core_id;
++
++static uint32_t example_index;
++static char*    example_str  ;
++static uint32_t example_size ;
++
++/**
++ * Keeps track of registered services.
++ */
++static struct capref services [aos_service_guard];
+ 
+-void libc_exit(int status)
++static void test_putchar (uint32_t base, char c)
+ {
+-    // Use spawnd if spawned through spawnd
+-    if(disp_get_domain_id() == 0) {
+-        errval_t err = cap_revoke(cap_dispatcher);
+-        if (err_is_fail(err)) {
+-            sys_print("revoking dispatcher failed in _Exit, spinning!", 100);
+-            while (1) {}
+-        }
+-        err = cap_delete(cap_dispatcher);
+-        sys_print("deleting dispatcher failed in _Exit, spinning!", 100);
++    // we need to send \r\n over the serial line for a newline
++    if (c == '\n') test_putchar(base, '\r');
+ 
+-        // XXX: Leak all other domain allocations
+-    } else {
+-        debug_printf("libc_exit NYI!\n");
+-    }
++    volatile uint32_t* uart_lsr = (uint32_t*) (base + 0x14);
++    uint32_t tx_fifo_e = 0x20;
++    volatile uint32_t* uart_thr = (uint32_t*) (base);
+ 
+-    // If we're not dead by now, we wait
+-    while (1) {}
++    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)
++    while ( ((*uart_lsr) & tx_fifo_e) == 0 ) {
++        // Do nothing
++    }
++    // Write character
++    *uart_thr = c;
+ }
+ 
+-static void libc_assert(const char *expression, const char *file,
+-                        const char *function, int line)
++static errval_t spawn_serial_driver (void)
+ {
+-    char buf[512];
+-    size_t len;
+-
+-    /* Formatting as per suggestion in C99 spec 7.2.1.1 */
+-    len = snprintf(buf, sizeof(buf), "Assertion failed on core %d in %.*s: %s,"
+-                   " function %s, file %s, line %d.\n",
+-                   disp_get_core_id(), DISP_NAME_LEN,
+-                   disp_name(), expression, function, file, line);
+-    sys_print(buf, len < sizeof(buf) ? len : sizeof(buf));
+-}
++    // TODO: This function just shows that serial driver works.
++    // We should actually create a thread and an endpoint, register ourselves with init,
++    // and listen for aos_rpc_connect, aos_rpc_serial_getchar and *putchar requests.
+ 
+-static size_t syscall_terminal_write(const char *buf, size_t len)
+-{
+-    if (len) {
+-        return sys_print(buf, len);
++    errval_t error = SYS_ERR_OK;
++
++    // Get device frame capability.
++    struct capref uart_cap;
++    error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
++
++    // Map the device into virtual address space.
++    void* buf;
++    int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
++    error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
++
++    thread_create(uart_driver_thread, NULL);
++
++    // Do a quick test.
++    uint32_t virtual_uart_base = (uint32_t) buf;
++    test_putchar (virtual_uart_base, '\n');
++    test_putchar (virtual_uart_base, '\n');
++    test_putchar (virtual_uart_base, '*');
++    test_putchar (virtual_uart_base, '\n');
++    test_putchar (virtual_uart_base, '\n');
++
++    if (err_is_fail (error)) {
++        debug_printf ("spawn_serial_driver: %s\n", err_getstring (error));
+     }
+-    return 0;
++    return error;
+ }
+ 
+-static size_t dummy_terminal_read(char *buf, size_t len)
+-{
+-    debug_printf("terminal read NYI! returning %d characters read\n", len);
+-    return len;
+-}
++/**
++ * Initialize the service lookup facility.
++ */
++static void init_services (void) {
+ 
+-/* Set libc function pointers */
+-void barrelfish_libc_glue_init(void)
+-{
+-    // TODO: change these to use the user-space serial driver if possible
+-    _libc_terminal_read_func = dummy_terminal_read;
+-    _libc_terminal_write_func = syscall_terminal_write;
+-    _libc_exit_func = libc_exit;
+-    _libc_assert_func = libc_assert;
+-    /* morecore func is setup by morecore_init() */
+-
+-    // XXX: set a static buffer for stdout
+-    // this avoids an implicit call to malloc() on the first printf
+-    static char buf[BUFSIZ];
+-    setvbuf(stdout, buf, _IOLBF, sizeof(buf));
+-    static char ebuf[BUFSIZ];
+-    setvbuf(stderr, ebuf, _IOLBF, sizeof(buf));
++    for (int i=0; i<aos_service_guard; i++) {
++        services [i] = NULL_CAP;
++    }
++
++    // Currently we're using init as the ram server.
++    services [aos_service_ram] = cap_initep;
+ }
+ 
+-#if 0
+-static bool register_w_init_done = false;
+-static void init_recv_handler(struct aos_chan *ac, struct lmp_recv_msg *msg, struct capref cap)
++/**
++ * A receive handler for init.
++ */
++static void recv_handler (void *arg)
+ {
+-    assert(ac == get_init_chan());
+-    debug_printf("in libbf init_recv_handler\n");
+-    register_w_init_done = true;
+-}
+-#endif
++//    debug_printf ("Handling LMP message...\n");
++    errval_t err = SYS_ERR_OK;
++    struct lmp_chan* lc = (struct lmp_chan*) arg;
++    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
++    struct capref cap;
+ 
+-//TODO: This global variable should be better encapsulated...
+-// Currently it's also used in aos_rpc.c
+-struct lmp_chan bootstrap_channel;
+-struct aos_rpc ram_server_connection;
++    // Retrieve capability and arguments.
++    err = lmp_chan_recv(lc, &msg, &cap);
+ 
+-static void test_handler (void* arg) {
++    if (err_is_fail(err) && lmp_err_is_transient(err)) {
++        // reregister
++        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
++    }
+ 
+-    struct lmp_chan* channel = arg;
+-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+-    struct capref cap;
+-    errval_t error = lmp_chan_recv(channel, &msg, &cap);
+-    debug_printf ("Received ACK: %s\n", err_getstring (error));
++    uint32_t type = msg.words [0];
++
++    switch (type)
++    {
++        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
++        // otherwise control will be transfered back to sender immediately...
++
++        case AOS_PING:
++            // Send a response to the ping request.
++            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
++
++            // Delete capability and reuse slot.
++            err = cap_delete (cap);
++            lmp_chan_set_recv_slot (lc, cap);
++            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
++            break;
++
++        case INIT_FIND_SERVICE:;
++            // Get the endpoint capability to a service.
++            // TODO: check validity.
++            uint32_t requested_service = msg.words [1];
++
++            // debug_printf ("Requested service: %u\n", requested_service);
++
++            // TODO<-done: Find out why lookup for services[0] == cap_initep fails.
++
++            // TODO: Apparently an endpoint can only connect to exactly one other endpoint.
++            // Therefore we need to change this function: init has to request a new endpoint
++            // at the service provider and later send it back to first domain.
++
++            // This can be done at a later point however... For now we could just implement
++            // all services in init and handle them in this global request handler.
++            lmp_ep_send0 (cap, 0, services [requested_service]);
++
++            // Delete capability and reuse slot.
++            cap_delete (cap);
++            lmp_chan_set_recv_slot (lc, cap);
++            debug_printf ("Handled INIT_FIND_SERVICE\n");
++            break;
++
++        case AOS_RPC_CONNECT:;
++            // Create a new channel.
++            struct lmp_chan* new_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
++            lmp_chan_init (new_channel);
++
++            // Set up channel for receiving.
++            err = lmp_chan_accept (new_channel, DEFAULT_LMP_BUF_WORDS, cap);
++            err = lmp_chan_alloc_recv_slot (new_channel);
++
++            // Register a receive handler for the new channel.
++            // TODO: maybe also use a different receive handler for connected clients.
++            err = lmp_chan_register_recv (new_channel, get_default_waitset(), MKCLOSURE (recv_handler, new_channel));
++
++            // Need to allocate a new slot for the main channel.
++            err = lmp_chan_alloc_recv_slot (lc);
++
++            err = lmp_chan_send2 (new_channel, 0, new_channel -> local_cap, 0, msg.words[1]);
++            debug_printf ("Handled AOS_RPC_CONNECT\n");
++            break;
++        case AOS_RPC_GET_RAM_CAP:;
++            size_t bits = msg.words [1];
++            struct capref ram;
++            errval_t error = ram_alloc (&ram, bits);
++
++            lmp_chan_send2 (lc, 0, ram, error, bits);
++
++            //TODO: do we need to destroy ram capability here?
++//          error = cap_destroy (ram);
++
++            debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
++            break;
++
++        case AOS_RPC_SEND_STRING:;
++            // TODO: maybe store the string somewhere else?
++
++            // Enlarge receive buffer if necessary.
++            uint32_t char_count = (LMP_MSG_LENGTH - 1) * sizeof (uint32_t);
++
++            if (example_index + char_count + 1 >= example_size) {
++                example_str = realloc(example_str, example_size * 2);
++                memset(&example_str[example_size], 0, example_size);
++                example_size *= 2;
++            }
++
++            memcpy(&example_str[example_index], &msg.words[1], char_count);
++            example_index += char_count;
++
++            // Append a null character to safely print the string.
++            example_str [example_index] = '\0';
++            debug_printf ("Handled AOS_RPC_SEND_STRING with string: %s\n", example_str + example_index - char_count);
++            if (example_str [example_index - 1] == '\0') {
++                debug_printf ("Received last chunk. Contents: \n");
++                printf("%s\n", example_str);
++            }
++            break;
++
++        default:
++            debug_printf ("Got default value\n");
++            if (! capref_is_null (cap)) {
++                cap_delete (cap);
++                lmp_chan_set_recv_slot (lc, cap);
++            }
++    }
++    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+ }
+ 
+-static errval_t __attribute__((unused))  ram_alloc_ipc (struct capref *ret, uint8_t size_bits, uint64_t minbase, uint64_t maxlimit)
++static int test_thread (void* arg)
+ {
+-    size_t ret_bits; // TODO: handle this...
+-    errval_t error = aos_rpc_get_ram_cap (&ram_server_connection, size_bits, ret, &ret_bits);
+-    debug_printf ("Allocating %u bits: %s\n", size_bits, err_getstring (error));
+-    return error;
++    // A small test for our separate page fault handler.
++    debug_printf ("test_thread: new thread created...\n");
++    size_t bufsize = 4*1024*1024;
++    char* buf = malloc (bufsize);
++    debug_printf ("test_thread: buffer allocated.\n");
++    for (int i=0; i<bufsize; i++) {
++        buf [i] = i%256;
++    }
++    debug_printf ("test_thread: buffer filled.\n");
++
++    free (buf);
++
++    debug_printf ("test_thread: end of thread reached.\n");
++    return 0;
+ }
+ 
+-/** \brief Initialise libbarrelfish.
+- *
+- * This runs on a thread in every domain, after the dispatcher is setup but
+- * before main() runs.
+- */
+-errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
++int main(int argc, char *argv[])
+ {
+     errval_t err;
+ 
+-    // do we have an environment?
+-    if (params != NULL && params->envp[0] != NULL) {
+-        extern char **environ;
+-        environ = params->envp;
++    /* Set the core id in the disp_priv struct */
++    err = invoke_kernel_get_core_id(cap_kernel, &my_core_id);
++    assert(err_is_ok(err));
++    disp_set_core_id(my_core_id);
++
++    debug_printf("init: invoked as:");
++    for (int i = 0; i < argc; i++) {
++       printf(" %s", argv[i]);
+     }
++    printf("\n");
+ 
+-    // Init default waitset for this dispatcher
+-    struct waitset *default_ws = get_default_waitset();
+-    waitset_init(default_ws);
++    debug_printf("FIRSTEP_OFFSET should be %zu + %zu\n",
++            get_dispatcher_size(), offsetof(struct lmp_endpoint, k));
+ 
+-    // Initialize ram_alloc state
+-    ram_alloc_init();
+-    /* All domains use smallcn to initialize */
+-    err = ram_alloc_set(ram_alloc_fixed);
+-    if (err_is_fail(err)) {
+-        return err_push(err, LIB_ERR_RAM_ALLOC_SET);
+-    }
++    // First argument contains the bootinfo location
++    bi = (struct bootinfo*)strtol(argv[1], NULL, 10);
+ 
+-    err = paging_init();
++    // setup memory serving
++    err = initialize_ram_alloc();
+     if (err_is_fail(err)) {
+-        return err_push(err, LIB_ERR_VSPACE_INIT);
++        DEBUG_ERR(err, "Failed to init local ram allocator");
++        abort();
+     }
++    debug_printf("initialized local ram alloc\n");
+ 
+-    err = slot_alloc_init();
++    // setup memory serving
++    err = initialize_mem_serv();
+     if (err_is_fail(err)) {
+-        return err_push(err, LIB_ERR_SLOT_ALLOC_INIT);
++        DEBUG_ERR(err, "Failed to init memory server module");
++        abort();
+     }
+ 
+-    err = morecore_init();
+-    if (err_is_fail(err)) {
+-        return err_push(err, LIB_ERR_MORECORE_INIT);
+-    }
++    // TODO (milestone 4): Implement a system to manage the device memory
++    // that's referenced by the capability in TASKCN_SLOT_IO in the task
++    // cnode. Additionally, export the functionality of that system to other
++    // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
++    err = initialize_device_frame_server (cap_io);
+ 
+-    lmp_endpoint_init();
++    if (err_is_ok (err)) {
++        err = spawn_serial_driver ();
++    }
+ 
+-    // init domains only get partial init
+-    if (init_domain) {
+-        return SYS_ERR_OK;
++    if (err_is_fail (err)) {
++        debug_printf ("Failed to initialize: %s\n", err_getstring (err));
+     }
+ 
+-    // TODO STEP 3: register ourselves with init
+-    debug_printf ("Initializing LMP system...\n");
+-    errval_t error; // TODO: error handling
++    debug_printf("initialized dev memory management\n");
+ 
+-    // Allocate lmp channel structure.
++    // TODO (milestone 3) STEP 2:
+ 
+-    // NOTE: We can't use malloc here, because this stupid ram allocator
+-    // only allows frames of one page size, and our paging code doesn't allow this.
+-    struct lmp_chan* init_channel = &bootstrap_channel;
++    // Set up the basic service registration mechanism.
++    init_services ();
+ 
+-    // Create local endpoint
+-    // Set remote endpoint to init's endpoint
+-    error = lmp_chan_accept (init_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
++    // Get the default waitset.
++    struct waitset* default_ws = get_default_waitset ();
+ 
+-    // Set receive handler
+-    // TODO: Use proper receive handler.
+-    error = lmp_chan_register_recv (init_channel, get_default_waitset(), MKCLOSURE (test_handler, init_channel));
++    // Allocate an LMP channel and do basic initializaton.
++    struct lmp_chan* my_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
++    lmp_chan_init (my_channel);
+ 
+-    // Send local endpoint to init.
+-    // TODO: Use proper protocol.
+-    error = lmp_ep_send1 (cap_initep, LMP_SEND_FLAGS_DEFAULT, init_channel -> local_cap, AOS_PING);
++    /* make local endpoint available -- this was minted in the kernel in a way
++     * such that the buffer is directly after the dispatcher struct and the
++     * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel 
++     * sentinel word).
++     *
++     * NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
++     * Thus the offset of the first endpoint structure is zero.
++     */
++    struct lmp_endpoint* my_endpoint; // Structure to be filled in.
++    err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &my_endpoint);// TODO: error handling
+ 
+-    // Wait for init to acknowledge receiving the endpoint.
+-    error = event_dispatch (get_default_waitset());
++    // Update the channel with the newly created endpoint.
++    my_channel -> endpoint = my_endpoint;
+ 
+-    // STEP 5: now we should have a channel with init set up and can
+-    // use it for the ram allocator
++    // The channel needs to know about the (kernel-created) capability to receive objects.
++    my_channel -> local_cap = cap_initep;
+ 
+-    struct capref ram_server_endpoint = NULL_CAP;
++    // Allocate a slot for incoming capabilities.
++    err = lmp_chan_alloc_recv_slot (my_channel);// TODO: error handling
+ 
+-    // TODO: find out why aos_find_service doesn't work.
+-//     error = aos_find_service (aos_service_ram, &ram_server_endpoint);
+-    ram_server_endpoint = cap_initep;
++    // Register a receive handler.
++    lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+ 
+-    error = aos_rpc_init (&ram_server_connection, ram_server_endpoint);
++    example_index =          0 ;
++    example_size  =        128 ;
++    example_str   = malloc(128);
+ 
+-    error = ram_alloc_set (ram_alloc_ipc);
++    // Test thread creation.
++    thread_create (test_thread, NULL);
+ 
++    // Go into messaging main loop.
++    while (true) {
++        err = event_dispatch (default_ws);// TODO: error handling
++        if (err_is_fail (err)) {
++            debug_printf ("Handling LMP message: %s\n", err_getstring (err));
++        }
++    }
+ 
+-    // right now we don't have the nameservice & don't need the terminal
+-    // and domain spanning, so we return here
+-    return SYS_ERR_OK;
+-}
++//     for (;;) sys_yield(CPTR_NULL);
++    debug_printf ("init returned.");
++    return EXIT_SUCCESS;
+ 
+-/**
+- *  \brief Initialise libbarrelfish, while disabled.
+- *
+- * This runs on the dispatcher's stack, while disabled, before the dispatcher is
+- * setup. We can't call anything that needs to be enabled (ie. cap invocations)
+- * or uses threads. This is called from crt0.
+- */
+-void barrelfish_init_disabled(dispatcher_handle_t handle, bool init_dom_arg);
+-void barrelfish_init_disabled(dispatcher_handle_t handle, bool init_dom_arg)
+-{
+-    init_domain = init_dom_arg;
+-    disp_init_disabled(handle);
+-    thread_init_disabled(handle, init_dom_arg);
+ }
+diff --git a/m2/usr/init/Hakefile b/m2/usr/init/Hakefile
+index edf733b..94ea6a6 100644
+--- a/m2/usr/init/Hakefile
++++ b/m2/usr/init/Hakefile
+@@ -11,7 +11,7 @@
+ --------------------------------------------------------------------------
+ 
+ [ build application { target = "init",
+-  		      cFiles = [ "mem_alloc.c", "init.c", "mem_serv.c", "device_frame_server.c" ],
++  		      cFiles = [ "mem_alloc.c", "init.c", "mem_serv.c", "device_frame_server.c", "terminal.c", "uart_driver.c" ],
+                       flounderDefs = [ "mem" ],
+                       addLinkFlags = [ "-e _start_init"],
+                       addLibraries = [ "mm", "getopt", "trace", "elf",
+diff --git a/m2/usr/init/init.c b/m2/usr/init/init.c
+index 011ce67..1460338 100644
+--- a/m2/usr/init/init.c
++++ b/m2/usr/init/init.c
+@@ -12,6 +12,7 @@
+  * ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
+  */
+ 
++#include "ipc_protocol.h"
+ #include "init.h"
+ #include <stdlib.h>
+ #include <string.h>
+@@ -36,28 +37,13 @@ static uint32_t example_index;
+ static char*    example_str  ;
+ static uint32_t example_size ;
+ 
++static struct capref service_uart;
++
+ /**
+  * Keeps track of registered services.
+  */
+ static struct capref services [aos_service_guard];
+ 
+-static void test_putchar (uint32_t base, char c)
+-{
+-    // we need to send \r\n over the serial line for a newline
+-    if (c == '\n') test_putchar(base, '\r');
+-
+-    volatile uint32_t* uart_lsr = (uint32_t*) (base + 0x14);
+-    uint32_t tx_fifo_e = 0x20;
+-    volatile uint32_t* uart_thr = (uint32_t*) (base);
+-
+-    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)
+-    while ( ((*uart_lsr) & tx_fifo_e) == 0 ) {
+-        // Do nothing
+-    }
+-    // Write character
+-    *uart_thr = c;
+-}
+-
+ static errval_t spawn_serial_driver (void)
+ {
+     // TODO: This function just shows that serial driver works.
+@@ -66,27 +52,9 @@ static errval_t spawn_serial_driver (void)
+ 
+     errval_t error = SYS_ERR_OK;
+ 
+-    // Get device frame capability.
+-    struct capref uart_cap;
+-    error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
+-
+-    // Map the device into virtual address space.
+-    void* buf;
+-    int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
+-    error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
+-
+-
+-    // Do a quick test.
+-    uint32_t virtual_uart_base = (uint32_t) buf;
+-    test_putchar (virtual_uart_base, '\n');
+-    test_putchar (virtual_uart_base, '\n');
+-    test_putchar (virtual_uart_base, '*');
+-    test_putchar (virtual_uart_base, '\n');
+-    test_putchar (virtual_uart_base, '\n');
++    thread_create(uart_driver_thread, NULL);
++    thread_create(   terminal_thread, NULL);
+ 
+-    if (err_is_fail (error)) {
+-        debug_printf ("spawn_serial_driver: %s\n", err_getstring (error));
+-    }
+     return error;
+ }
+ 
+@@ -217,6 +185,60 @@ static void recv_handler (void *arg)
+                 printf("%s\n", example_str);
+             }
+             break;
++        case AOS_REGISTER_SERVICE:;
++            errval_t status = STATUS_ALREADY_EXIST;
++            
++            debug_printf ("Handled AOS_REGISTER_SERVICE ot type 0x%x\n", msg.words [1]);
++            
++            // Requested service must be unfilled and provider must pass a capp for communication
++            if (!capref_is_null(cap)) {
++                void* buf;
++
++                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 1\n", msg.words [1]);
++                if (capref_is_null(service_uart)) {
++                    if (msg.words[1] == SERVICE_UART_DRIVER) {
++                        debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]);
++
++                        struct capref uart_cap;
++
++                        status = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
++                        if (!err_is_fail (status)) {  
++                            int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
++    
++                            status = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
++                            if (!err_is_fail (status)) { 
++                                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]); 
++                                service_uart = cap           ;
++                                status       = STATUS_SUCCESS;
++                            }
++                        }
++                    }
++                }
++                
++                lmp_ep_send3(cap, 0, NULL_CAP, AOS_REGISTRATION_COMPETE, status, (uint32_t)buf);
++                
++                lmp_ep_send1(cap, 0, NULL_CAP, UART_CONNECT   );
++                lmp_ep_send1(cap, 0, NULL_CAP, UART_RECV_BYTE );
++                lmp_ep_send2(cap, 0, NULL_CAP, UART_SEND_BYTE , 'x');
++                lmp_ep_send1(cap, 0, NULL_CAP, UART_DISCONNECT);
++            }
++            break;
++        
++        case AOS_GET_SERVICE:;
++        
++            debug_printf ("Handled AOS_GET_SERVICE ot type 0x%x\n", msg.words [1]);
++            
++            if (!capref_is_null(cap)) {
++                if (msg.words[1] == SERVICE_UART_DRIVER) {
++                    lmp_ep_send1(cap, 0, service_uart, AOS_GET_SERVICE);
++                }
++            }
++            
++            break;
++
++        case UART_RECV_BYTE:;
++            debug_printf ("Handled UART_RECV_BYTE received '%c'\n", msg.words [1]);
++            break;
+ 
+         default:
+             debug_printf ("Got default value\n");
+@@ -246,9 +268,45 @@ static int test_thread (void* arg)
+     return 0;
+ }
+ 
++static errval_t create_channel(struct capref* cap, void (*handler)(void*))
++{
++    struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
++
++    errval_t err = -1;
++
++    if (channel != NULL) {
++        struct lmp_endpoint* endpoint;
++
++        lmp_chan_init (channel);
++        
++        err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &endpoint);
++        if (err_is_fail(err)) {
++            debug_printf ("ERROR: On endpoint setup.\n");
++        } else {
++            channel->endpoint  = endpoint;
++            channel->local_cap = *cap    ;
++
++            err = lmp_chan_alloc_recv_slot(channel);
++            if (err_is_fail(err)) {
++                debug_printf ("ERROR: On allocation of recv slot.\n");
++            } else {
++                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
++                if (err_is_fail(err)) 
++                {
++                    debug_printf ("ERROR: On channel registration.\n");
++                }
++            }
++        }
++    }
++
++    return err;
++}
++
+ int main(int argc, char *argv[])
+ {
+     errval_t err;
++    
++    service_uart = NULL_CAP;
+ 
+     /* Set the core id in the disp_priv struct */
+     err = invoke_kernel_get_core_id(cap_kernel, &my_core_id);
+@@ -288,6 +346,20 @@ int main(int argc, char *argv[])
+     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
+     err = initialize_device_frame_server (cap_io);
+ 
++    // Allocate an LMP channel and do basic initializaton.
++    err = create_channel(&cap_initep, recv_handler);
++    if (err_is_fail(err)) {
++        debug_printf("ERROR! Channel for INIT wasn't created\n");
++    }
++    /*err = create_channel(&cap_uartep, recv_handler);
++    if (err_is_fail(err)) {
++        debug_printf("ERROR! Channel for UART wasn't created\n");
++    }
++    err = create_channel(&cap_termep, recv_handler);
++    if (err_is_fail(err)) {
++        debug_printf("ERROR! Channel for TERM wasn't created\n");
++    }*/
++
+     if (err_is_ok (err)) {
+         err = spawn_serial_driver ();
+     }
+@@ -303,36 +375,6 @@ int main(int argc, char *argv[])
+     // Set up the basic service registration mechanism.
+     init_services ();
+ 
+-    // Get the default waitset.
+-    struct waitset* default_ws = get_default_waitset ();
+-
+-    // Allocate an LMP channel and do basic initializaton.
+-    struct lmp_chan* my_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
+-    lmp_chan_init (my_channel);
+-
+-    /* make local endpoint available -- this was minted in the kernel in a way
+-     * such that the buffer is directly after the dispatcher struct and the
+-     * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel 
+-     * sentinel word).
+-     *
+-     * NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
+-     * Thus the offset of the first endpoint structure is zero.
+-     */
+-    struct lmp_endpoint* my_endpoint; // Structure to be filled in.
+-    err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &my_endpoint);// TODO: error handling
+-
+-    // Update the channel with the newly created endpoint.
+-    my_channel -> endpoint = my_endpoint;
+-
+-    // The channel needs to know about the (kernel-created) capability to receive objects.
+-    my_channel -> local_cap = cap_initep;
+-
+-    // Allocate a slot for incoming capabilities.
+-    err = lmp_chan_alloc_recv_slot (my_channel);// TODO: error handling
+-
+-    // Register a receive handler.
+-    lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+-
+     example_index =          0 ;
+     example_size  =        128 ;
+     example_str   = malloc(128);
+@@ -342,7 +384,7 @@ int main(int argc, char *argv[])
+ 
+     // Go into messaging main loop.
+     while (true) {
+-        err = event_dispatch (default_ws);// TODO: error handling
++        err = event_dispatch (get_default_waitset());// TODO: error handling
+         if (err_is_fail (err)) {
+             debug_printf ("Handling LMP message: %s\n", err_getstring (err));
+         }
+diff --git a/m2/usr/init/init.h b/m2/usr/init/init.h
+index 7421133..26ec512 100644
+--- a/m2/usr/init/init.h
++++ b/m2/usr/init/init.h
+@@ -22,9 +22,13 @@
+ extern struct bootinfo *bi;
+ 
+ errval_t initialize_ram_alloc(void);
+-errval_t initialize_mem_serv(void);
++errval_t initialize_mem_serv (void);
+ 
+-errval_t initialize_device_frame_server (struct capref io_space_cap);
+-errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struct capref* ret_frame);
++errval_t initialize_device_frame_server (                                           struct capref  io_space_cap);
++errval_t allocate_device_frame          (lpaddr_t physical_base, uint8_t size_bits, struct capref* ret_frame   );
++
++// Entry point of the UART driver thread 
++int    terminal_thread(void* arg);
++int uart_driver_thread(void* arg);
+ 
+ #endif // INIT_H

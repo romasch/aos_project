@@ -103,6 +103,30 @@ enum aos_service {
  */
 #define AOS_RPC_SEND_STRING 5
 
+/**
+ * Send a character to be printed by the UART driver.
+ *
+ * Type: Synchronous
+ * Target: Serial driver
+ * Send Args: a character
+ * Send Capability: -
+ * Receive Args: no reply
+ * Receive Capability: -
+ */
+#define AOS_RPC_SERIAL_PUTCHAR 6
+
+/**
+ * Request a single character from the UART driver.
+ *
+ * Type: Synchronous
+ * Target: Serial driver
+ * Send Args: -
+ * Send Capability: -
+ * Receive Args: error value, input character
+ * Receive Capability: -
+ */
+#define AOS_RPC_SERIAL_GETCHAR 7
+
 enum rpc_datatype {
     UNDEFINED = 0,
     NT_STRING = 1

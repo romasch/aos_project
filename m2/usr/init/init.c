@@ -44,6 +44,7 @@ static struct capref service_uart;
  */
 static struct capref services [aos_service_guard];
 
+__attribute__((unused))
 static errval_t spawn_serial_driver (void)
 {
     // TODO: This function just shows that serial driver works.
@@ -187,9 +188,9 @@ static void recv_handler (void *arg)
             break;
         case AOS_REGISTER_SERVICE:;
             errval_t status = STATUS_ALREADY_EXIST;
-            
+
             debug_printf ("Handled AOS_REGISTER_SERVICE ot type 0x%x\n", msg.words [1]);
-            
+
             // Requested service must be unfilled and provider must pass a capp for communication
             if (!capref_is_null(cap)) {
                 void* buf;
@@ -202,40 +203,52 @@ static void recv_handler (void *arg)
                         struct capref uart_cap;
 
                         status = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
-                        if (!err_is_fail (status)) {  
+                        if (!err_is_fail (status)) {
                             int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
-    
+
                             status = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
-                            if (!err_is_fail (status)) { 
-                                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]); 
+                            if (!err_is_fail (status)) {
+                                debug_printf ("Handled AOS_REGISTER_SERVICE of type 0x%x with cap 2\n", msg.words [1]);
                                 service_uart = cap           ;
                                 status       = STATUS_SUCCESS;
                             }
                         }
                     }
                 }
-                
+
                 lmp_ep_send3(cap, 0, NULL_CAP, AOS_REGISTRATION_COMPETE, status, (uint32_t)buf);
-                
+
                 lmp_ep_send1(cap, 0, NULL_CAP, UART_CONNECT   );
                 lmp_ep_send1(cap, 0, NULL_CAP, UART_RECV_BYTE );
                 lmp_ep_send2(cap, 0, NULL_CAP, UART_SEND_BYTE , 'x');
                 lmp_ep_send1(cap, 0, NULL_CAP, UART_DISCONNECT);
             }
             break;
-        
+
         case AOS_GET_SERVICE:;
-        
+
             debug_printf ("Handled AOS_GET_SERVICE ot type 0x%x\n", msg.words [1]);
-            
+
             if (!capref_is_null(cap)) {
                 if (msg.words[1] == SERVICE_UART_DRIVER) {
                     lmp_ep_send1(cap, 0, service_uart, AOS_GET_SERVICE);
                 }
             }
-            
+
             break;
 
+
+        case AOS_RPC_SERIAL_PUTCHAR:;
+            debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
+            char output_character = msg.words [1];
+            uart_putchar (output_character);
+            uart_putchar ('\n');
+            break;
+        case AOS_RPC_SERIAL_GETCHAR:;
+            debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
+            char input_character = uart_getchar ();
+            lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
+            break;
         case UART_RECV_BYTE:;
             debug_printf ("Handled UART_RECV_BYTE received '%c'\n", msg.words [1]);
             break;
@@ -268,17 +281,22 @@ static int test_thread (void* arg)
     return 0;
 }
 
+
+// NOTE: can only be used for cap_initep...
+/*
 static errval_t create_channel(struct capref* cap, void (*handler)(void*))
 {
+    errval_t err = SYS_ERR_OK;
+
+    // Allocate an LMP channel and do basic initializaton.
     struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
 
-    errval_t err = -1;
-
     if (channel != NULL) {
-        struct lmp_endpoint* endpoint;
-
         lmp_chan_init (channel);
-        
+
+
+        struct lmp_endpoint* endpoint; // Structure to be filled in.
+
         err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &endpoint);
         if (err_is_fail(err)) {
             debug_printf ("ERROR: On endpoint setup.\n");
@@ -291,21 +309,24 @@ static errval_t create_channel(struct capref* cap, void (*handler)(void*))
                 debug_printf ("ERROR: On allocation of recv slot.\n");
             } else {
                 err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
-                if (err_is_fail(err)) 
+                if (err_is_fail(err))
                 {
                     debug_printf ("ERROR: On channel registration.\n");
                 }
             }
         }
+    } else {
+        // malloc returned NULL...
+        err = LIB_ERR_MALLOC_FAIL;
     }
 
     return err;
-}
+}//*/
 
 int main(int argc, char *argv[])
 {
     errval_t err;
-    
+
     service_uart = NULL_CAP;
 
     /* Set the core id in the disp_priv struct */
@@ -346,12 +367,16 @@ int main(int argc, char *argv[])
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
     err = initialize_device_frame_server (cap_io);
 
+
+    // TODO (milestone 3) STEP 2:
+
+    /*
     // Allocate an LMP channel and do basic initializaton.
     err = create_channel(&cap_initep, recv_handler);
     if (err_is_fail(err)) {
         debug_printf("ERROR! Channel for INIT wasn't created\n");
     }
-    /*err = create_channel(&cap_uartep, recv_handler);
+    err = create_channel(&cap_uartep, recv_handler);
     if (err_is_fail(err)) {
         debug_printf("ERROR! Channel for UART wasn't created\n");
     }
@@ -361,7 +386,8 @@ int main(int argc, char *argv[])
     }*/
 
     if (err_is_ok (err)) {
-        err = spawn_serial_driver ();
+//         err = spawn_serial_driver ();
+        init_uart_driver ();
     }
 
     if (err_is_fail (err)) {
@@ -370,11 +396,39 @@ int main(int argc, char *argv[])
 
     debug_printf("initialized dev memory management\n");
 
-    // TODO (milestone 3) STEP 2:
 
     // Set up the basic service registration mechanism.
     init_services ();
+#if 1
+    // Get the default waitset.
+    struct waitset* default_ws = get_default_waitset ();
 
+    struct lmp_chan* my_channel = malloc (sizeof (struct lmp_chan));// TODO: error handling
+    lmp_chan_init (my_channel);
+
+    /* make local endpoint available -- this was minted in the kernel in a way
+     * such that the buffer is directly after the dispatcher struct and the
+     * buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel
+     * sentinel word).
+     *
+     * NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
+     * Thus the offset of the first endpoint structure is zero.
+     */
+    struct lmp_endpoint* my_endpoint; // Structure to be filled in.
+    err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &my_endpoint);// TODO: error handling
+
+    // Update the channel with the newly created endpoint.
+    my_channel -> endpoint = my_endpoint;
+
+    // The channel needs to know about the (kernel-created) capability to receive objects.
+    my_channel -> local_cap = cap_initep;
+
+    // Allocate a slot for incoming capabilities.
+    err = lmp_chan_alloc_recv_slot (my_channel);// TODO: error handling
+
+    // Register a receive handler.
+    lmp_chan_register_recv (my_channel, default_ws, MKCLOSURE (recv_handler, my_channel));// TODO: error handling
+#endif
     example_index =          0 ;
     example_size  =        128 ;
     example_str   = malloc(128);
@@ -390,7 +444,6 @@ int main(int argc, char *argv[])
         }
     }
 
-//     for (;;) sys_yield(CPTR_NULL);
     debug_printf ("init returned.");
     return EXIT_SUCCESS;
 
