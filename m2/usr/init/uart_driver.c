@@ -4,11 +4,10 @@
 #include <barrelfish/lmp_chan.h>
 #include <mm/mm.h>
 
-//static struct lmp_chan client_channel;
-static struct lmp_chan server_channel;
+// static struct lmp_chan server_channel;
 
-static bool connected = false;
-static bool terminate = false;
+// static bool connected = false;
+// static bool terminate = false;
 
 static uint32_t dev_base;
 
@@ -24,63 +23,14 @@ void init_uart_driver (void){
     error = allocate_device_frame (UART_BASE, UART_SIZE_BITS, &uart_cap);
 
     // Map the device into virtual address space.
-     void* buf;
-     int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
-     error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
+    void* buf;
+    int flags = KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE | KPI_PAGING_FLAGS_NOCACHE;
+    error = paging_map_frame_attr (get_current_paging_state(), &buf, UART_SIZE, uart_cap, flags, NULL, NULL);
 
     dev_base = (uint32_t) buf;
+
+    //TODO: Get the device in a consistent state.
 }
-
-
-/*static void client_handler(void *arg)
-{
-    struct capref        cap;
-    struct lmp_chan    * lc  = &client_channel  ;
-    struct lmp_recv_msg  msg = LMP_RECV_MSG_INIT;
-    
-    errval_t err  = lmp_chan_recv(lc, &msg, &cap);
-    uint32_t type;
-
-    if (err_is_fail(err) && lmp_err_is_transient(err)) {
-        lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(client_handler, NULL));
-    }
-
-    type = msg.words[0];
-
-    debug_printf ("uart_driver_thread:c: Have LMP message received - %u\n", type);
-
-    switch (type)
-    {
-        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
-        // otherwise control will be transfered back to sender immediately...
-
-        case UART_DISCONNECT:;
-            debug_printf ("uart_driver_thread: UART_DISCONNECT\n", type);
-            
-            lmp_chan_destroy(&client_channel);
-            
-            connected = false;
-            
-            break;
-            
-        case UART_RECV_BYTE:;
-            debug_printf ("uart_driver_thread: UART_RECV_BYTE\n", type);
-            break;
-            
-        case UART_SEND_BYTE:;
-            debug_printf ("uart_driver_thread: UART_SEND_BYTE\n", type);
-            break;
-            
-        default:
-            debug_printf ("Got default value\n");
-            if (! capref_is_null (cap)) {
-                cap_delete (cap);
-                lmp_chan_set_recv_slot (lc, cap);
-            }
-    }
-
-    lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(client_handler, NULL));
-}*/
 
 char uart_getchar(void)
 {
@@ -105,6 +55,7 @@ void uart_putchar(char c)
     *uart_thr = c;
 }
 
+/*
 static void server_handler(void *arg)
 {
     struct capref        cap;
@@ -182,14 +133,14 @@ static void server_handler(void *arg)
     }
 
     lmp_chan_register_recv(lc, get_default_waitset(), MKCLOSURE(server_handler, NULL));
-}
+}//*/
 
-int uart_driver_thread(void* arg)
+static int uart_driver_thread(void* arg)
 {
     // A small test for our separate page fault handler.
     debug_printf ("uart_driver_thread: STARTED.\n");
     // ----------------------------------------------
-
+/*
     errval_t err;
 
     err = lmp_chan_accept(&server_channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
@@ -215,9 +166,23 @@ int uart_driver_thread(void* arg)
             debug_printf ("\tERROR: uart_driver_thread: Handling LMP message: %s\n", err_getstring (err));
         }
     }
-    // ----------------------------------------------
+    //*/
     debug_printf ("uart_driver_thread: FINISHED.\n");
     
     return EXIT_SUCCESS;
+}
+
+/**
+ * Spawn a thread that creates an endpoint, registers itself with init, and listens
+ * for AOS_ROUTE_REQUEST_EP, AOS_RPC_CONNECTION_INIT as well as the putchar/getchar IPC calls.
+ */
+errval_t spawn_serial_driver_thread (void)
+{
+    errval_t error = SYS_ERR_OK;
+
+    thread_create(uart_driver_thread, NULL);
+//     thread_create(terminal_thread, NULL);
+
+    return error;
 }
 

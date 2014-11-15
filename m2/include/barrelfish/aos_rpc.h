@@ -50,10 +50,10 @@ enum aos_service {
  *
  * Type: Synchronous
  * Target: init
- * Send Args: Service identifier, endpoint capability of current processor.
- * Receive Args: no response
+ * Send Args: Service identifier
+ * Receive Args: Error value
  */
-#define INIT_REGISTER_SERVICE 1
+#define AOS_ROUTE_REGISTER_SERVICE 1
 
 /**
  * Find endpoint capability of a service.
@@ -315,6 +315,7 @@ errval_t aos_rpc_delete(struct aos_rpc *chan, char *path);
  */
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver);
 
+errval_t aos_connection_init (struct lmp_chan* channel);
 
 /**
  * \brief Find the endpoint for the domain which provides the specified service.
@@ -325,10 +326,9 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint);
 /**
  * \brief Register a service of the current process with init.
  */
-errval_t aos_register_service (uint32_t service, struct capref endpoint);
+errval_t aos_register_service (struct aos_rpc* rpc, uint32_t service);
 
 
-errval_t aos_connection_init (struct lmp_chan* channel);
 
 /**
  * Ping a domain.

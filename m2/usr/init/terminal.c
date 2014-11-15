@@ -1,8 +1,10 @@
+#if 0
 #include "ipc_protocol.h"
 #include "init.h"
 
 #include <barrelfish/lmp_chan.h>
 #include <mm/mm.h>
+
 
 static struct lmp_chan server_channel;
 //static struct lmp_chan uart___channel;
@@ -128,3 +130,4 @@ int terminal_thread(void* arg)
     
     return EXIT_SUCCESS;
 }
+#endif

@@ -388,9 +388,40 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint)
 }
 
 
+errval_t aos_register_service (struct aos_rpc* rpc, uint32_t service)
+{
+    debug_printf_quiet ("aos_register_service...\n");
+    errval_t error = SYS_ERR_OK;
+
+    // Check arguments.
+    if (service < 0 || service >= aos_service_guard) {
+        error = SYS_ERR_INVARGS_SYSCALL; // TODO: is there a better error type?
+
+    } else {
+        // Provide a new set of message arguments.
+        struct lmp_message_args my_args;
+        init_lmp_message_args (&my_args, &(rpc->channel));
+
+        // Set up the arguments according to IPC convention.
+        my_args.message.words [0] = AOS_ROUTE_REGISTER_SERVICE;
+        my_args.message.words [1] = service;
+
+        // Do the actual IPC call.
+        error = aos_send_receive (&my_args, false);
+        print_error (error, "aos_find_service:%s\n", err_getstring (error));
+
+        // Set the result parameter.
+        if (err_is_ok (error)) {
+            error = my_args.message.words [0];
+        }
+    }
+    print_error (error, "aos_find_service:%s\n", err_getstring (error));
+    return error;
+}
+
 errval_t aos_ping (struct aos_rpc* chan, uint32_t value)
 {
-    debug_printf_quiet ("aos_ping, channel %p...\n", channel);
+    debug_printf_quiet ("aos_ping, channel %p...\n", chan);
 
     struct lmp_chan* channel = &chan->channel;
     // Provide a set of message arguments.
@@ -462,7 +493,7 @@ errval_t aos_connection_init (struct lmp_chan* channel)
     args.cap = channel -> local_cap;
 
     // Do the IPC call.
-    error = aos_send_receive (&args, true);
+    error = aos_send_receive (&args, false);
     print_error (error, "aos_connection_init: communication failed. %s\n", err_getstring (error));
 
     // Get the result.
