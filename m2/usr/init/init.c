@@ -30,6 +30,8 @@
 
 #include <mm/mm.h>
 
+#define MEMEATER_NAME "armv7/sbin/memeater"
+
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
@@ -203,6 +205,7 @@ static void recv_handler (void *arg)
  * Set up the user-level data structures for the
  * kernel-created endpoint for init.
  */
+__attribute__((unused))
 static errval_t initep_setup (void)
 {
     errval_t err = SYS_ERR_OK;
@@ -291,6 +294,48 @@ int main(int argc, char *argv[])
         abort();
     }
 
+    // Create our endpoint to self
+    err = cap_retype(cap_selfep, cap_dispatcher, ObjType_EndPoint, 0);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to create our endpoint to self");
+        // bail out, there isn?t much we can do without a self endpoint.
+        abort();
+    }
+
+    // Load memeater
+    //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
+    debug_printf("Spawning memeater (%s)...\n", MEMEATER_NAME);
+    struct spawninfo memeater_spawninfo;
+    err = spawn_load_with_bootinfo(&memeater_spawninfo, bi, MEMEATER_NAME, my_core_id);
+//    if (err_is_fail(err)) {
+         debug_printf ("Error: %s\n", err_getstring (err));
+//    }
+//     // Initialize memeater
+//     err = initialize_mem_serv(&memeater_spawninfo);
+//     if (err_is_fail(err)) {
+//          debug_printf ("Error: %s\n", err_getstring (err));
+//     }
+
+
+    // Allocate an incoming LMP endpoint for memeater
+    struct lmp_chan memeater_chan;
+    lmp_chan_init (&memeater_chan);
+    err = lmp_chan_accept(&memeater_chan, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+    err = lmp_chan_alloc_recv_slot(&memeater_chan);
+    err = lmp_chan_register_recv(&memeater_chan, get_default_waitset(), MKCLOSURE (recv_handler, &memeater_chan));
+
+
+    // Give endpoint to memeater
+    struct capref memeater_remote_cap;
+    memeater_remote_cap.cnode = memeater_spawninfo.taskcn;
+    memeater_remote_cap.slot  = TASKCN_SLOT_INITEP;
+    err = cap_copy(memeater_remote_cap, memeater_chan.local_cap);
+
+    //Make mem_serv runnable
+    err = spawn_run(&memeater_spawninfo);
+
+    err = spawn_free(&memeater_spawninfo);
+
     // TODO (milestone 4): Implement a system to manage the device memory
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
     // cnode. Additionally, export the functionality of that system to other
@@ -315,15 +360,15 @@ int main(int argc, char *argv[])
     init_data_structures ();
 
     // Set up init's kernel-created endpoint.
-    err = initep_setup ();
-    if (err_is_fail (err)) {
-        debug_printf ("FATAL: Could not set up init endpoint\n");
-        abort();
-    }
+//     err = initep_setup ();
+//     if (err_is_fail (err)) {
+//         debug_printf ("FATAL: Could not set up init endpoint\n");
+//         abort();
+//     }
 
     // Spawn a user-level thread.
     // NOTE: This thread is linked to a routine in memeater that tests this thread.
-    err = spawn_test_thread(recv_handler);
+//    err = spawn_test_thread(recv_handler);
 
     // Go into messaging main loop.
     while (true) {

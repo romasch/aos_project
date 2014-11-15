@@ -650,7 +650,7 @@ struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
     return init_dcb;
 }
 
-static void check_error (errval_t error)
+__attribute__((unused)) static void check_error (errval_t error)
 {
     if (err_is_fail (error)) {
         panic ("Fatal error: %u\n", error);

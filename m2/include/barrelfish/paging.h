@@ -109,6 +109,8 @@ struct paging_state {
     struct ptable_lvl2* ptables [ARM_L1_USER_ENTRIES];
     // ptable_mem is a simple memory manager for second-level page tables
     struct slab_alloc ptable_mem;
+    // Capability to level 1 page table.
+    struct capref ptable_lvl1_cap;
 
     // Frame management:
 

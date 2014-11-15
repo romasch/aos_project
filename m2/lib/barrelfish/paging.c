@@ -266,10 +266,11 @@ static errval_t paging_allocate_ptable (struct paging_state* state, uint32_t l1_
     if (err_is_ok (error)) {
 
         // Get the predefined capability for the first-level page table.
-        struct capref l1_cap = (struct capref) {
+        struct capref l1_cap = state -> ptable_lvl1_cap;
+        /*struct capref l1_cap = (struct capref) {
             .cnode = cnode_page,
             .slot = 0,
-        };
+        };*/
 
         // Now map the page table.
         error = vnode_map(l1_cap, l2_cap, l1_index, FLAGS, 0, 1);
@@ -439,6 +440,9 @@ errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struc
     st -> heap_begin = start_vaddr;
     st -> heap_end = start_vaddr;
 
+    // Initialize ptable struct.
+    st -> ptable_lvl1_cap = pdir;
+
     // Initialize dynamic memory for management.
     slab_init (&(st->ptable_mem), sizeof (struct ptable_lvl2), memory_refill);
     slab_init (&(st->frame_mem), sizeof (struct frame_list), memory_refill);
@@ -467,8 +471,12 @@ errval_t paging_init(void)
     // avoid code duplication.
 
     //TODO check if VADDR_OFFSET is ok as the start of our heap.
-    //TODO: remove struct capref pdir, or store lvl1 page table.
-    paging_init_state (&current, VADDR_OFFSET, NULL_CAP);
+
+    struct capref pdir = (struct capref) {
+        .cnode = cnode_page,
+        .slot = 0,
+    };
+    paging_init_state (&current, VADDR_OFFSET, pdir);
 
     set_current_paging_state(&current);
 
