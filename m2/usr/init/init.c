@@ -274,6 +274,7 @@ static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_chan
 
     // Struct to keep track of new domains cspace, vspace, etc...
     struct spawninfo new_domain;
+    memset (&new_domain, 0, sizeof (struct spawninfo));
 
     // Concatenate the name.
     char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
@@ -374,9 +375,6 @@ int main(int argc, char *argv[])
         abort();
     }
 
-    struct lmp_chan memeater_chan;
-    spawn_with_channel ("memeater", &memeater_chan);
-
     // TODO (milestone 4): Implement a system to manage the device memory
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
     // cnode. Additionally, export the functionality of that system to other
@@ -409,7 +407,14 @@ int main(int argc, char *argv[])
 
     // Spawn a user-level thread.
     // NOTE: This thread is linked to a routine in memeater that tests this thread.
-    err = spawn_test_thread(recv_handler);
+//     err = spawn_test_thread(recv_handler);
+
+    struct lmp_chan memeater_chan;
+    spawn_with_channel ("memeater", &memeater_chan);
+
+    struct lmp_chan test_domain_chan;
+    err = spawn_with_channel ("test_domain", &test_domain_chan);
+    debug_printf ("test_domain: %s\n", err_getstring (err));
 
     // Go into messaging main loop.
     while (true) {

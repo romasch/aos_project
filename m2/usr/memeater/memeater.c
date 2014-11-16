@@ -17,7 +17,7 @@ static struct aos_rpc* serial_channel;
 static struct aos_rpc* test_channel;
 
 
-static void test_route_to_init_thread (void);
+static void test_routing_to_domain (void);
 
 static bool starts_with(const char *prefix, const char *str)
 {
@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
     error = lmp_ep_send1 (cap_initep, flags, cap_selfep, 43);
     debug_printf ("Send message: %s\n", err_getstring (error));
 
-    test_route_to_init_thread();
+    test_routing_to_domain();
 
     // Test opening another channel.
     // NOTE: A first channel is already created to talk to RAM server.
@@ -168,34 +168,23 @@ int main(int argc, char *argv[])
     _libc_terminal_read_func = aos_rpc_terminal_read;
     _libc_terminal_write_func = aos_rpc_terminal_write;
 
-    struct capref test_ep;
-    aos_find_service (aos_service_test, &test_ep);
-
     start_shell ();
 
     debug_printf ("memeater returned\n");
     return 0;
 }
 
-static void test_handler (void* arg) {
-    struct lmp_chan* channel = arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-    errval_t error = lmp_chan_recv(channel, &msg, &cap);
-    debug_printf ("Received ACK: %s\n", err_getstring (error));
-}
 
-static void test_route_to_init_thread (void)
+// Connect to the test domain and send a message.
+static void test_routing_to_domain (void)
 {
     // Test routing
-    struct capref test_thread;
     errval_t error;
-    error = aos_find_service (aos_service_test, &test_thread);
-    struct lmp_chan test;
-    lmp_chan_init (&test);
-    lmp_chan_accept (&test, DEFAULT_LMP_BUF_WORDS, test_thread);
-    lmp_ep_send1 (test_thread, LMP_SEND_FLAGS_DEFAULT, test.local_cap, AOS_PING);
-    error = lmp_chan_register_recv (&test, get_default_waitset(), MKCLOSURE (test_handler, &test));
-    error = event_dispatch (get_default_waitset());
-    debug_printf ("aos_find_service: %s\n", err_getstring (error));
+    struct capref test_domain;
+    error = aos_find_service (aos_service_test, &test_domain);
+
+    struct aos_rpc test_domain_chan;
+    error = aos_rpc_init (&test_domain_chan, test_domain);
+
+    error = aos_ping (&test_domain_chan, 42);
 }
