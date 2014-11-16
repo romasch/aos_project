@@ -1,0 +1,13 @@
+--------------------------------------------------------------------------
+--
+-- Hakefile for test_domain
+--
+--------------------------------------------------------------------------
+
+[ build application { target = "test_domain",
+              cFiles = [ "main.c" ],
+                      flounderDefs = [ "mem" ],
+                      architectures = allArchitectures
+                    }
+]
+
