@@ -401,6 +401,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
 static errval_t memory_refill (struct slab_alloc* allocator)
 {
     PRINT_ENTRY;
+    debug_printf_quiet ("memory_refill on state %p\n", get_current_paging_state());
 
     // Initialize constants.
     size_t pages = SLAB_REFILL_PAGE_COUNT;
@@ -408,14 +409,14 @@ static errval_t memory_refill (struct slab_alloc* allocator)
 
     // Need to reserve virtual space.
     void* buf;
-    errval_t err = paging_alloc (&current, &buf, bytes);
+    errval_t err = paging_alloc (get_current_paging_state(), &buf, bytes);
 
     // Map the allocated virtual space.
     // This is needed as the memory is used for page table
     // management (i.e. by the page fault handler), and a double
     // page fault would be deadly.
     if (err_is_ok (err)) {
-        err = paging_map_eagerly (&current, (lvaddr_t) buf, pages);
+        err = paging_map_eagerly (get_current_paging_state(), (lvaddr_t) buf, pages);
     }
 
     if (err_is_ok (err)) {
@@ -432,6 +433,7 @@ static errval_t memory_refill (struct slab_alloc* allocator)
 errval_t paging_init_state (struct paging_state *st, lvaddr_t start_vaddr, struct capref pdir)
 {
     PRINT_ENTRY;
+    debug_printf_quiet ("paging_init_state: state %p, start %X\n", st, start_vaddr);
 
     // Make sure we have zeroed out memory.
     memset (st, 0, sizeof (struct paging_state));
@@ -477,6 +479,7 @@ errval_t paging_init(void)
         .slot = 0,
     };
     paging_init_state (&current, VADDR_OFFSET, pdir);
+    assert (get_current_paging_state() == 0);
 
     set_current_paging_state(&current);
 
@@ -552,7 +555,7 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
                       pr->base_addr,
                       pr -> current_addr,
                       req_size);
-        paging_region_init (&current, pr, SLOT_REGION_SIZE);
+        paging_region_init (get_current_paging_state(), pr, SLOT_REGION_SIZE);
     }
 
     lvaddr_t end_addr = pr->base_addr + pr->region_size;
@@ -576,7 +579,7 @@ errval_t paging_region_map(struct paging_region *pr, size_t req_size,
         return LIB_ERR_VSPACE_MMU_AWARE_NO_SPACE;
     }
 
-    errval_t error = paging_map_eagerly (&current, pr -> current_addr, pages_to_map);
+    errval_t error = paging_map_eagerly (get_current_paging_state(), pr -> current_addr, pages_to_map);
 
     if (err_is_ok (error)) {
         *retbuf = (void*)pr->current_addr;
@@ -607,12 +610,13 @@ errval_t paging_region_unmap(struct paging_region *pr, lvaddr_t base, size_t byt
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes)
 {
-    debug_printf_quiet ("paging_alloc: allocating %X bytes.\n", bytes);
-    assert (st = &current);
+    debug_printf_quiet ("paging_alloc: state %p, bytes %X...\n", st, bytes);
+ //   assert (st == &current);
     assert ((bytes & (PAGE_SIZE-1)) == 0);
 
     *buf = (void*)  st -> heap_end;
     st -> heap_end += bytes;
+    debug_printf_quiet ("paging_alloc: state %p, bytes %X, start %p.\n", st, bytes, *buf);
     return SYS_ERR_OK;
 }
 
@@ -625,6 +629,7 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
                                int flags, void *arg1, void *arg2)
 {
     PRINT_ENTRY;
+    debug_printf_quiet ("paging_map_frame_attr: state %p\n", st);
     errval_t err = paging_alloc(st, buf, bytes);
     if (err_is_fail(err)) {
         return err;
@@ -648,6 +653,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
     // keep this in mind when designing your self-paging system.
 
     PRINT_ENTRY;
+    debug_printf_quiet ("paging_map_fixed_attr: state %p (%p -> %p), addr %X\n", state, state->heap_begin, state->heap_end, vaddr);
 
     // Enforce page alignment restriction.
     assert ((vaddr & (PAGE_SIZE-1)) == 0);

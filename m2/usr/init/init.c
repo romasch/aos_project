@@ -368,7 +368,7 @@ int main(int argc, char *argv[])
 
     // Spawn a user-level thread.
     // NOTE: This thread is linked to a routine in memeater that tests this thread.
-//    err = spawn_test_thread(recv_handler);
+    err = spawn_test_thread(recv_handler);
 
     // Go into messaging main loop.
     while (true) {
