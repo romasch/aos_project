@@ -30,7 +30,7 @@
 
 #include <mm/mm.h>
 
-#define MEMEATER_NAME "armv7/sbin/memeater"
+#define BINARY_PREFIX "armv7/sbin/"
 
 struct bootinfo *bi;
 static coreid_t my_core_id;
@@ -258,6 +258,78 @@ static errval_t initep_setup (void)
     return err;
 } //*/
 
+
+/**
+ * Spawn a new domain with an initial channel to init.
+ *
+ * \arg domain_name: The name of the new process. NOTE: Name should come
+ * without path prefix, i.e. just pass "memeater" instead of "armv7/sbin/memeater".
+ *
+ * \arg ret_channel: Structure to be filled in with new channel.
+ */
+static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_channel)
+{
+    debug_printf("Spawning new domain: %s...\n", domain_name);
+    errval_t error = SYS_ERR_OK;
+
+    // Struct to keep track of new domains cspace, vspace, etc...
+    struct spawninfo new_domain;
+
+    // Concatenate the name.
+    char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
+    strcpy (prefixed_name, BINARY_PREFIX);
+    strcat (prefixed_name, domain_name);
+
+    //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
+    // Try to find a better suited function
+    error = spawn_load_with_bootinfo (&new_domain, bi, prefixed_name, my_core_id);
+
+
+    // Initialize memeater.
+    // NOTE: In upstream barrelfish, this function copies around some more capabilities.
+    // It doesn't seem to be necessary though...
+    // error = initialize_mem_serv(&new_domain);
+
+    if (err_is_ok (error)) {
+
+        // Set up an LMP endpoint in init for the new domain.
+        lmp_chan_init (ret_channel);
+        error = lmp_chan_accept(ret_channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+
+        // Register for incoming requests with the default handler.
+        if (err_is_ok (error)) {
+            error = lmp_chan_register_recv(ret_channel, get_default_waitset(), MKCLOSURE (recv_handler, ret_channel));
+        }
+        // Reserve a slot for incoming capabilities.
+        if (err_is_ok (error)) {
+            error = lmp_chan_alloc_recv_slot(ret_channel);
+        }
+        // Clean up in case of errors.
+        if (err_is_fail (error)) {
+            lmp_chan_destroy (ret_channel);
+        }
+    }
+
+    // Copy the endpoint of the new channel into the new domain.
+    if (err_is_ok (error)) {
+        struct capref init_remote_cap;
+        init_remote_cap.cnode = new_domain.taskcn;
+        init_remote_cap.slot  = TASKCN_SLOT_INITEP;
+
+        error = cap_copy(init_remote_cap, ret_channel->local_cap);
+    }
+
+    // Make the domain runnable
+    if (err_is_ok (error)) {
+        error = spawn_run(&new_domain);
+    }
+
+    // Clean up structures in current domain.
+    error = spawn_free(&new_domain);
+
+    return error;
+}
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -298,43 +370,12 @@ int main(int argc, char *argv[])
     err = cap_retype(cap_selfep, cap_dispatcher, ObjType_EndPoint, 0);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "Failed to create our endpoint to self");
-        // bail out, there isn?t much we can do without a self endpoint.
+        // bail out, there isn't much we can do without a self endpoint.
         abort();
     }
 
-    // Load memeater
-    //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
-    debug_printf("Spawning memeater (%s)...\n", MEMEATER_NAME);
-    struct spawninfo memeater_spawninfo;
-    err = spawn_load_with_bootinfo(&memeater_spawninfo, bi, MEMEATER_NAME, my_core_id);
-//    if (err_is_fail(err)) {
-         debug_printf ("Error: %s\n", err_getstring (err));
-//    }
-//     // Initialize memeater
-//     err = initialize_mem_serv(&memeater_spawninfo);
-//     if (err_is_fail(err)) {
-//          debug_printf ("Error: %s\n", err_getstring (err));
-//     }
-
-
-    // Allocate an incoming LMP endpoint for memeater
     struct lmp_chan memeater_chan;
-    lmp_chan_init (&memeater_chan);
-    err = lmp_chan_accept(&memeater_chan, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
-    err = lmp_chan_alloc_recv_slot(&memeater_chan);
-    err = lmp_chan_register_recv(&memeater_chan, get_default_waitset(), MKCLOSURE (recv_handler, &memeater_chan));
-
-
-    // Give endpoint to memeater
-    struct capref memeater_remote_cap;
-    memeater_remote_cap.cnode = memeater_spawninfo.taskcn;
-    memeater_remote_cap.slot  = TASKCN_SLOT_INITEP;
-    err = cap_copy(memeater_remote_cap, memeater_chan.local_cap);
-
-    //Make mem_serv runnable
-    err = spawn_run(&memeater_spawninfo);
-
-    err = spawn_free(&memeater_spawninfo);
+    spawn_with_channel ("memeater", &memeater_chan);
 
     // TODO (milestone 4): Implement a system to manage the device memory
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
