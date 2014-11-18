@@ -164,6 +164,43 @@ enum aos_service {
  */
 #define AOS_RPC_CONNECTION_INIT 9
 
+/**
+ * Spawn new domain from the requested binary.
+ *
+ * Type: Synchronous
+ * Target: process manager (init)
+ * Send Args: process name
+ * Send Capability: -
+ * Receive Args: error value and pid of the created process.
+ * Receive Capability: -
+ */
+#define AOS_RPC_SPAWN_PROCESS 10
+
+/**
+ * Request for the process name.
+ *
+ * Type: Synchronous
+ * Target: process manager (init)
+ * Send Args: process identifier
+ * Send Capability: -
+ * Receive Args: error value and process name.
+ * Receive Capability: -
+ */
+#define AOS_RPC_GET_PROCESS_NAME 11
+
+/**
+ * Request for the list of all processes known for process manager.
+ *
+ * Type: Synchronous
+ * Target: process manager (init)
+ * Send Args: -
+ * Send Capability: -
+ * Receive Args: error value and list of process id's.
+ * Receive Capability: -
+ */
+#define AOS_RPC_GET_PROCESS_LIST 12
+
+
 struct aos_rpc {
     struct lmp_chan channel;
     // TODO: add state for your implementation
@@ -202,14 +239,15 @@ errval_t aos_rpc_get_dev_cap(struct aos_rpc *chan, lpaddr_t paddr,
                              size_t length, struct capref *retcap,
                              size_t *retlen);
 
+/* ----------------------------------------------------------------------------------*/
+/* ---------------------- PROCESS MANAGEMENT ----------------------------------------*/
+/* ----------------------------------------------------------------------------------*/
 /**
  * \brief Request process manager to start a new process
- * \arg name the name of the process that needs to be spawned (without a
- *           path prefix)
+ * \arg name the name of the process that needs to be spawned (without a path prefix)
  * \arg newpid the process id of the newly spawned process
  */
-errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name,
-                               domainid_t *newpid);
+errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *newpid);
 
 /**
  * \brief Get name of process with id pid.
@@ -218,8 +256,7 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name,
  * that is allocated by the rpc implementation. Freeing is the caller's
  * responsibility.
  */
-errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
-                                  char **name);
+errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid, char **name);
 
 /**
  * \brief Get process ids of all running processes
@@ -228,8 +265,12 @@ errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
  * caller's  responsibility.
  * \arg pid_count The number of entries in `pids' if the call was successful
  */
-errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
-                                      domainid_t **pids, size_t *pid_count);
+errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan, domainid_t **pids, size_t *pid_count);
+
+
+
+
+
 
 /**
  * \brief open a file

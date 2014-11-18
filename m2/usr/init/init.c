@@ -135,7 +135,7 @@ static void recv_handler (void *arg)
             }
             break;
         case AOS_ROUTE_REGISTER_SERVICE:;
-            // TODO: error handling
+            debug_printf ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);
             assert (capref_is_null (cap));
             services [msg.words [1]] = lc;
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
@@ -168,7 +168,11 @@ static void recv_handler (void *arg)
             uint32_t requested_service = msg.words [1];
             struct lmp_chan* serv = services [requested_service];
             // generate AOS_ROUTE_REQUEST_EP request with ID.
-            lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
+            if (serv != NULL) {
+                lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
+            } else {
+                debug_printf ("ERROR! Service 0x%x is unknown\n", requested_service);    
+            }
             break;
         case AOS_ROUTE_REQUEST_EP:;
             // NOTE: implemented by all servers, and init usually doesn't handle this.
@@ -191,8 +195,18 @@ static void recv_handler (void *arg)
             lmp_chan_set_recv_slot (lc, cap);
             lmp_chan_alloc_recv_slot (lc);
             break;
+        case AOS_RPC_SPAWN_PROCESS:;
+            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
+            break;
+        case AOS_RPC_GET_PROCESS_NAME:;
+            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
+            break;
+        case AOS_RPC_GET_PROCESS_LIST:;
+            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
+            break;
         default:
-            debug_printf ("Got default value\n");
+            // YK: Uncomment this if you really need it.
+            //debug_printf ("Got default value\n");
             if (! capref_is_null (cap)) {
                 cap_delete (cap);
                 lmp_chan_set_recv_slot (lc, cap);

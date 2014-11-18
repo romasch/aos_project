@@ -282,11 +282,36 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c)
     return SYS_ERR_OK;
 }
 
-errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name,
-                               domainid_t *newpid)
+errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *newpid)
 {
-    // TODO (milestone 5): implement spawn new process rpc
-    return SYS_ERR_OK;
+    // Request a creation of new process from the binary packed into boot image.
+    errval_t error = -1; // Consider -1 as a sign of general error
+
+    if (chan != NULL && name != NULL && (newpid != NULL)) {
+        struct lmp_message_args  args   ;
+        struct lmp_chan        * channel = &chan->channel;
+    
+        init_lmp_message_args (&args, channel);
+
+        args.message.words [0] = AOS_RPC_SPAWN_PROCESS;
+
+        // Do the IPC call.
+        error = aos_send_receive(&args, true);
+        print_error (error, "aos_rpc_process_spawn: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+
+            error = args.message.words [0];
+            print_error (error, "aos_rpc_process_spawn: operation failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                *newpid = args.message.words [1];
+            }
+        }
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,

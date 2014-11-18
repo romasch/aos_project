@@ -14,7 +14,8 @@ extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 #define BUFSIZE (4UL*1024*1024)
 
 static struct aos_rpc* serial_channel;
-static struct aos_rpc* test_channel;
+static struct aos_rpc* test_channel  ;
+static struct aos_rpc* pm_channel    ;
 
 
 static void test_routing_to_domain (void);
@@ -55,8 +56,34 @@ static void start_shell (void)
 {
     debug_printf ("Started simple shell...\n");
     
-    char buf[256];
-    int  number   = 0;
+    char     buf[256];
+    errval_t error   ;
+    int      number   = 0;
+    
+    debug_printf ("\t Test process management API \n");
+
+    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_SPAWN_PROCESS   );
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_SPAWN_PROCESS   \n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_SPAWN_PROCESS   \n");
+    }
+
+    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_GET_PROCESS_NAME);
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_NAME\n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_NAME\n");
+    }
+
+    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_GET_PROCESS_LIST);
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_LIST\n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_LIST\n");
+    }
+    
+    debug_printf ("\t Test of process management API finished\n");
 
     while (true) {
         bool finished = false;
@@ -108,8 +135,9 @@ static void start_shell (void)
 int main(int argc, char *argv[])
 {
     debug_printf("memeater started\n");
+    pm_channel     = aos_rpc_get_init_channel ();
     serial_channel = aos_rpc_get_init_channel ();
-    test_channel = aos_rpc_get_init_channel ();
+    test_channel   = aos_rpc_get_init_channel ();
 
 
     errval_t error = SYS_ERR_OK;
@@ -182,9 +210,13 @@ static void test_routing_to_domain (void)
     errval_t error;
     struct capref test_domain;
     error = aos_find_service (aos_service_test, &test_domain);
+    if (!err_is_fail (error)) {
+        struct aos_rpc test_domain_chan;
 
-    struct aos_rpc test_domain_chan;
-    error = aos_rpc_init (&test_domain_chan, test_domain);
+        error = aos_rpc_init (&test_domain_chan, test_domain);
 
-    error = aos_ping (&test_domain_chan, 42);
+        error = aos_ping (&test_domain_chan, 42);
+    } else {
+        debug_printf ("ERROR! test_routing_to_domain() failed to find service");      
+    }
 }
