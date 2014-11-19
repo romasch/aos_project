@@ -45,6 +45,7 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
     return i;
 }
 
+static void test_routing_to_domain (void);
 
 /**
  * A simple shell that handles echo, run_memtest and exit commands.
@@ -56,6 +57,8 @@ static void start_shell (void)
         
     debug_printf ("Started simple shell...\n");
     
+    test_routing_to_domain();
+
     while (true) {
         bool finished = false;
         int  i        = 0    ;
@@ -174,6 +177,7 @@ int main(int argc, char *argv[])
         debug_printf ("\t\t (X) AOS_RPC_SPAWN_PROCESS   \n");
     } else {
         debug_printf ("\t\t (V) AOS_RPC_SPAWN_PROCESS   \n");
+        debug_printf ("\t\t\t Pid: 0x%x\n", pid);
     }
 
     error = aos_rpc_process_get_name(pm_channel, pid, &name);
@@ -181,6 +185,9 @@ int main(int argc, char *argv[])
         debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_NAME\n");
     } else {
         debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_NAME\n");
+        debug_printf ("\t\t\t Name: %s\n", name);
+
+        free(name);
     }
 
     error = aos_rpc_process_get_all_pids(pm_channel, &pids, &count);
@@ -188,6 +195,9 @@ int main(int argc, char *argv[])
         debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_LIST\n");
     } else {
         debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_LIST\n");
+        debug_printf ("\t\t\t Pid list: 0x%x {0x%x}\n", count, pids[0]);
+
+        free(pids);
     }
     
     debug_printf ("\t Test of process management API finished\n");
@@ -207,19 +217,23 @@ int main(int argc, char *argv[])
 
 
 // Connect to the test domain and send a message.
-/*static void test_routing_to_domain (void)
-{
+static void test_routing_to_domain (void)
+{   
     // Test routing
-    errval_t error;
-    struct capref test_domain;
-    error = aos_find_service (aos_service_test, &test_domain);
-    if (!err_is_fail (error)) {
-        struct aos_rpc test_domain_chan;
+    for (bool success = false; success == false;) {
+        errval_t error;
+        struct capref test_domain;
+        error = aos_find_service (aos_service_test, &test_domain);
+        if (!err_is_fail (error)) {
+            struct aos_rpc test_domain_chan;
 
-        error = aos_rpc_init (&test_domain_chan, test_domain);
+            error = aos_rpc_init (&test_domain_chan, test_domain);
 
-        error = aos_ping (&test_domain_chan, 42);
-    } else {
-        debug_printf ("ERROR! test_routing_to_domain() failed to find service");      
+            error = aos_ping (&test_domain_chan, 42);
+
+            success = true;
+        } else {
+            // Try again in hope of quick test_domain registration in the system
+        }
     }
-}*/
+}

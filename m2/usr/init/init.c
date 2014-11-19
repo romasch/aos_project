@@ -153,7 +153,7 @@ static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_chan
     return error;
 }
 
-static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
+/*static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
 {
     finished = false;
 
@@ -168,7 +168,7 @@ static bool str_to_args(const char* string, uint32_t* args, size_t args_length, 
     }
 
     return finished;
-}
+}*/
 
 /**
  * A receive handler for init.
@@ -278,7 +278,8 @@ static void recv_handler (void *arg)
             if (serv != NULL) {
                 lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
             } else {
-                debug_printf ("ERROR! Service 0x%x is unknown\n", requested_service);    
+                // Service is unknown. Send error back.
+                lmp_chan_send1 (lc, 0, NULL_CAP, -1);  
             }
             break;
         case AOS_ROUTE_REQUEST_EP:;
@@ -307,7 +308,7 @@ static void recv_handler (void *arg)
             char    * name   = (char*)&msg.words [1];
             errval_t  status = -1                   ;
 
-            debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
+            //DBG: debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
 
             // Lookup of free process slot in process database
             for (int i = 0; (i < COUNT_OF(ddb)) && (idx == -1); i++) {
@@ -316,11 +317,11 @@ static void recv_handler (void *arg)
                 }
             }
             
-            debug_printf ("                          <- 0x%x\n", idx);
-
             if (idx != -1) {
-                // Spawn new process
                 status = spawn_with_channel(name, &ddb[idx].channel);
+                if (!err_is_fail(err)) {
+                    strcpy(ddb[idx].name, name);
+                }
             }    
             
             // Send reply back to the client
@@ -331,22 +332,34 @@ static void recv_handler (void *arg)
             
             status = -1;
 
-            debug_printf ("Got AOS_RPC_GET_PROCESS_NAME <== 0x%x\n", pid);
+            //DBG: debug_printf ("Got AOS_RPC_GET_PROCESS_NAME <== 0x%x\n", pid);
 
             if ((pid < COUNT_OF(ddb)) && (ddb[pid].name[0] != '\0')) {
                 uint32_t args[8];
-                int      indx    = 0;
-            
-                str_to_args(ddb[pid].name, args, COUNT_OF(args), &indx, false);
-                   
+                
+                strcpy((char*)args, ddb[pid].name);
+
                 lmp_chan_send9 (lc, 0, NULL_CAP, 0, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
             } else {
                 lmp_chan_send1 (lc, 0, NULL_CAP, -1);
             }
             break;
         case AOS_RPC_GET_PROCESS_LIST:;
-            debug_printf ("Got AOS_RPC_GET_PROCESS_LIST\n");
-            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
+            //DBG: debug_printf ("Got AOS_RPC_GET_PROCESS_LIST\n");
+            uint32_t args[7] = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
+            int      didx    =  0                                                                                  ;
+
+            idx = 0xffffffff;
+            
+            for (int i = msg.words [1]; (i < COUNT_OF(ddb)) && (didx < COUNT_OF(args)); i++) {
+                if (ddb[i].name[0] != '\0') {
+                    args[didx] = i;
+                    idx  = i + 1;
+                    didx++;
+                }
+            }
+
+            lmp_chan_send9 (lc, 0, NULL_CAP, 0, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             break;
         default:
             // YK: Uncomment this if you really need it.

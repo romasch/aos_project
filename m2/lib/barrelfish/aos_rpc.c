@@ -259,7 +259,7 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc)
     args.message.words [0] = AOS_RPC_SERIAL_GETCHAR;
 
     // Do the IPC call.
-    error = aos_send_receive (&args, true);
+    error = aos_send_receive (&args, false);
     print_error (error, "aos_rpc_serial_getchar: communication failed. %s\n", err_getstring (error));
 
     // Get the result.
@@ -364,29 +364,40 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
                                       domainid_t **pids, size_t *pid_count)
 {
     // Process id discovery
-    errval_t error = -1; // Consider -1 as a sign of general error
+    errval_t error = 0;
     
     if ((chan != NULL) && (pids != NULL) && (pid_count != NULL)) {
         struct lmp_message_args  args   ;
         struct lmp_chan        * channel = &chan->channel;
+
+        int idx = 0;
     
         init_lmp_message_args (&args, channel);
 
-        args.message.words [0] = AOS_RPC_GET_PROCESS_LIST;
+        *pids      = NULL;
+        *pid_count = 0   ; 
+        for (; (idx != 0xffffffff) && err_is_ok (error);) {
+            args.message.words [0] = AOS_RPC_GET_PROCESS_LIST;
+            args.message.words [1] = idx                     ;
+            // Do the IPC call.
+            error = aos_send_receive(&args, true);
+            print_error (error, "aos_rpc_process_get_all_pids: communication failed. %s\n", err_getstring (error));
+          
+            if (err_is_ok (args.message.words[0])) {
+                idx = args.message.words [1];
+                
+                for (int i = 0; i < 7; i++) {
+                    if (args.message.words[2 + i] != 0xffffffff) {
+                        if ((*pid_count & (*pid_count - 1)) == 0) {
+                            *pids = realloc(*pids, (*pid_count == 0) ? (1) : (*pid_count * 2));
+                        }
 
-        // Do the IPC call.
-        error = aos_send_receive(&args, true);
-        print_error (error, "aos_rpc_process_get_all_pids: communication failed. %s\n", err_getstring (error));
-
-        // Get the result.
-        if (err_is_ok (error)) {
-
-            error = args.message.words [0];
-            print_error (error, "aos_rpc_process_get_all_pids: operation failed. %s\n", err_getstring (error));
-
-            if (err_is_ok (error)) {
-                //newpid = args.message.words [1];
-                // TODO
+                        (*pids)[*pid_count] = args.message.words[2 + i];
+                        (*pid_count)++;
+                    } else {
+                        i = 7;
+                    }
+                }
             }
         }
     }
