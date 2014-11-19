@@ -17,9 +17,6 @@ static struct aos_rpc* serial_channel;
 static struct aos_rpc* test_channel  ;
 static struct aos_rpc* pm_channel    ;
 
-
-static void test_routing_to_domain (void);
-
 static bool starts_with(const char *prefix, const char *str)
 {
     uint32_t lenpre = strlen(prefix);
@@ -54,37 +51,11 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
  */
 static void start_shell (void)
 {
+    char buf[256];
+    int  number   = 0;
+        
     debug_printf ("Started simple shell...\n");
     
-    char     buf[256];
-    errval_t error   ;
-    int      number   = 0;
-    
-    debug_printf ("\t Test process management API \n");
-
-    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_SPAWN_PROCESS   );
-    if (err_is_fail (error)) {
-        debug_printf ("\t\t (X) AOS_RPC_SPAWN_PROCESS   \n");
-    } else {
-        debug_printf ("\t\t (V) AOS_RPC_SPAWN_PROCESS   \n");
-    }
-
-    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_GET_PROCESS_NAME);
-    if (err_is_fail (error)) {
-        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_NAME\n");
-    } else {
-        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_NAME\n");
-    }
-
-    error = lmp_ep_send1 (cap_initep, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, AOS_RPC_GET_PROCESS_LIST);
-    if (err_is_fail (error)) {
-        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_LIST\n");
-    } else {
-        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_LIST\n");
-    }
-    
-    debug_printf ("\t Test of process management API finished\n");
-
     while (true) {
         bool finished = false;
         int  i        = 0    ;
@@ -154,8 +125,6 @@ int main(int argc, char *argv[])
     error = lmp_ep_send1 (cap_initep, flags, cap_selfep, 43);
     debug_printf ("Send message: %s\n", err_getstring (error));
 
-    test_routing_to_domain();
-
     // Test opening another channel.
     // NOTE: A first channel is already created to talk to RAM server.
 
@@ -192,11 +161,45 @@ int main(int argc, char *argv[])
     aos_rpc_serial_getchar (serial_channel, c);
     debug_printf (c);
 
+    ///////////////////////////////////////////////////
+    debug_printf ("\t Test process management API \n");
+
+    size_t      count;
+    char      * name ;
+    domainid_t  pid  ;
+    domainid_t* pids ;
+    
+    error = aos_rpc_process_spawn(pm_channel, "test_domain", &pid);
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_SPAWN_PROCESS   \n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_SPAWN_PROCESS   \n");
+    }
+
+    error = aos_rpc_process_get_name(pm_channel, pid, &name);
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_NAME\n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_NAME\n");
+    }
+
+    error = aos_rpc_process_get_all_pids(pm_channel, &pids, &count);
+    if (err_is_fail (error)) {
+        debug_printf ("\t\t (X) AOS_RPC_GET_PROCESS_LIST\n");
+    } else {
+        debug_printf ("\t\t (V) AOS_RPC_GET_PROCESS_LIST\n");
+    }
+    
+    debug_printf ("\t Test of process management API finished\n");
+    ///////////////////////////////////////////////////
+
     // TODO: actually we should do this way earlier, in lib/barrelfish/init.c
     _libc_terminal_read_func = aos_rpc_terminal_read;
     _libc_terminal_write_func = aos_rpc_terminal_write;
 
     start_shell ();
+
+    //test_routing_to_domain();
 
     debug_printf ("memeater returned\n");
     return 0;
@@ -204,7 +207,7 @@ int main(int argc, char *argv[])
 
 
 // Connect to the test domain and send a message.
-static void test_routing_to_domain (void)
+/*static void test_routing_to_domain (void)
 {
     // Test routing
     errval_t error;
@@ -219,4 +222,4 @@ static void test_routing_to_domain (void)
     } else {
         debug_printf ("ERROR! test_routing_to_domain() failed to find service");      
     }
-}
+}*/

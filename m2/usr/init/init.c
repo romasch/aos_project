@@ -32,6 +32,17 @@
 
 #define BINARY_PREFIX "armv7/sbin/"
 
+#define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
+
+// Entry of the process database maintained by init.
+struct ddb_entry
+{
+           char     name[MAX_PROCESS_NAME_LENGTH + 1];
+    struct lmp_chan channel                          ;
+};
+
+static struct ddb_entry ddb[32];
+
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
@@ -53,7 +64,12 @@ static int find_request_index = 0;
 /**
  * Initialize some data structures.
  */
-static void init_data_structures (void) {
+static void init_data_structures (void) 
+{
+    for (int i=0; i<COUNT_OF(ddb); i++) {
+        ddb[i].name[0] = '\0';
+    }    
+
     for (int i=0; i<aos_service_guard; i++) {
         services [i] = NULL;
     }
@@ -63,215 +79,7 @@ static void init_data_structures (void) {
     example_str   = malloc(128);
 }
 
-/**
- * A receive handler for init.
- */
-static void recv_handler (void *arg)
-{
-//     debug_printf ("Handling LMP message, channel %p...\n", arg);
-    errval_t err = SYS_ERR_OK;
-    struct lmp_chan* lc = (struct lmp_chan*) arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
-
-    // Retrieve capability and arguments.
-    err = lmp_chan_recv(lc, &msg, &cap);
-
-    if (err_is_fail(err) && lmp_err_is_transient(err)) {
-        // reregister
-        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
-    }
-
-    uint32_t type = msg.words [0];
-
-    switch (type)
-    {
-        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
-        // otherwise control will be transfered back to sender immediately...
-
-        case AOS_PING:
-            // Send a response to the ping request.
-            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
-
-            // Delete capability and reuse slot.
-            err = cap_delete (cap);
-            lmp_chan_set_recv_slot (lc, cap);
-            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
-            break;
-        case AOS_RPC_GET_RAM_CAP:;
-            size_t bits = msg.words [1];
-            struct capref ram;
-            errval_t error = ram_alloc (&ram, bits);
-
-            lmp_chan_send2 (lc, 0, ram, error, bits);
-
-            //TODO: do we need to destroy ram capability here?
-//          error = cap_destroy (ram);
-
-            debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
-            break;
-
-        case AOS_RPC_SEND_STRING:;
-            // TODO: maybe store the string somewhere else?
-
-            // Enlarge receive buffer if necessary.
-            uint32_t char_count = (LMP_MSG_LENGTH - 1) * sizeof (uint32_t);
-
-            if (example_index + char_count + 1 >= example_size) {
-                example_str = realloc(example_str, example_size * 2);
-                memset(&example_str[example_size], 0, example_size);
-                example_size *= 2;
-            }
-
-            memcpy(&example_str[example_index], &msg.words[1], char_count);
-            example_index += char_count;
-
-            // Append a null character to safely print the string.
-            example_str [example_index] = '\0';
-            debug_printf ("Handled AOS_RPC_SEND_STRING with string: %s\n", example_str + example_index - char_count);
-            if (example_str [example_index - 1] == '\0') {
-                debug_printf ("Received last chunk. Contents: \n");
-                printf("%s\n", example_str);
-            }
-            break;
-        case AOS_ROUTE_REGISTER_SERVICE:;
-            debug_printf ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);
-            assert (capref_is_null (cap));
-            services [msg.words [1]] = lc;
-            lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
-            break;
-        case AOS_RPC_SERIAL_PUTCHAR:;
-//             debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
-            char output_character = msg.words [1];
-            uart_putchar (output_character);
-            break;
-        case AOS_RPC_SERIAL_GETCHAR:;
-//             debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
-            char input_character = uart_getchar ();
-            lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
-            break;
-        case AOS_RPC_CONNECTION_INIT:;
-            debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
-            lc->remote_cap = cap;
-            err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
-            err = lmp_chan_send1 (lc, 0, NULL_CAP, err);
-            break;
-
-        case AOS_ROUTE_FIND_SERVICE:;
-            debug_printf ("Got AOS_ROUTE_FIND_SERVICE\n");
-            // generate new ID
-            uint32_t id = find_request_index;
-            find_request_index++;
-            // store current channel at ID
-            find_request [id] = lc;
-            // find correct server channel
-            uint32_t requested_service = msg.words [1];
-            struct lmp_chan* serv = services [requested_service];
-            // generate AOS_ROUTE_REQUEST_EP request with ID.
-            if (serv != NULL) {
-                lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
-            } else {
-                debug_printf ("ERROR! Service 0x%x is unknown\n", requested_service);    
-            }
-            break;
-        case AOS_ROUTE_REQUEST_EP:;
-            // NOTE: implemented by all servers, and init usually doesn't handle this.
-            debug_printf ("Got AOS_ROUTE_REQUEST_EP\n");
-            // Extract request ID
-            // Create a new endpoint with accept (using NULL_CAP)
-            // Generate answer with AOS_ROUTE_DELIVER_EP, error value and request ID
-            break;
-        case AOS_ROUTE_DELIVER_EP:;
-            debug_printf ("Got AOS_ROUTE_DELIVER_EP\n");
-            // get error value and ID from message
-            errval_t error_ret = msg.words [1];
-            id = msg.words [2];
-            // lookup receiver channel at ID
-            struct lmp_chan* recv = find_request [id]; // TODO: delete id
-            // generate response with cap and error value
-            lmp_chan_send1 (recv, 0, cap, error_ret);
-            // Delete cap and reuse slot
-            err = cap_delete (cap);
-            lmp_chan_set_recv_slot (lc, cap);
-            lmp_chan_alloc_recv_slot (lc);
-            break;
-        case AOS_RPC_SPAWN_PROCESS:;
-            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
-            break;
-        case AOS_RPC_GET_PROCESS_NAME:;
-            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
-            break;
-        case AOS_RPC_GET_PROCESS_LIST:;
-            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
-            break;
-        default:
-            // YK: Uncomment this if you really need it.
-            //debug_printf ("Got default value\n");
-            if (! capref_is_null (cap)) {
-                cap_delete (cap);
-                lmp_chan_set_recv_slot (lc, cap);
-            }
-    }
-    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
-}
-
-/**
- * Set up the user-level data structures for the
- * kernel-created endpoint for init.
- */
-__attribute__((unused))
-static errval_t initep_setup (void)
-{
-    errval_t err = SYS_ERR_OK;
-
-    // Allocate an LMP channel and do basic initializaton.
-    // TODO; maybe make the allocated channel structure available somewhere.
-    struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
-
-    if (channel != NULL) {
-        lmp_chan_init (channel);
-
-        // make local endpoint available -- this was minted in the kernel in a way
-        // such that the buffer is directly after the dispatcher struct and the
-        // buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel
-        // sentinel word).
-
-        // NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
-        // Thus the offset of the first endpoint structure is zero.
-
-        struct lmp_endpoint* endpoint; // Structure to be filled in.
-        err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &endpoint);
-
-        if (err_is_fail(err)) {
-            debug_printf ("ERROR: On endpoint setup.\n");
-
-        } else {
-            // Update the channel with the newly created endpoint.
-            channel->endpoint  = endpoint;
-            // The channel needs to know about the (kernel-created) capability to receive objects.
-            channel->local_cap = cap_initep;
-
-            // Allocate a slot for incoming capabilities.
-            err = lmp_chan_alloc_recv_slot(channel);
-            if (err_is_fail(err)) {
-                debug_printf ("ERROR: On allocation of recv slot.\n");
-
-            } else {
-                // Register a receive handler.
-                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
-                if (err_is_fail(err))
-                {
-                    debug_printf ("ERROR: On channel registration.\n");
-                }
-            }
-        }
-    } else {
-        // malloc returned NULL...
-        err = LIB_ERR_MALLOC_FAIL;
-    }
-    return err;
-} //*/
-
+static void recv_handler (void *arg);
 
 /**
  * Spawn a new domain with an initial channel to init.
@@ -345,6 +153,269 @@ static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_chan
     return error;
 }
 
+static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
+{
+    finished = false;
+
+    for (int i = 0; (i < args_length) && (finished == false); i++) {
+        for (int j = 0; (j < 4) && (finished == false); j++, (*indx)++) {
+            args[i] |= (uint32_t)(string[*indx]) << (8 * j);
+
+            if ((string[*indx] == '\0') && (finished == false)) {
+                finished = true;
+            }
+        }
+    }
+
+    return finished;
+}
+
+/**
+ * A receive handler for init.
+ */
+static void recv_handler (void *arg)
+{
+//     debug_printf ("Handling LMP message, channel %p...\n", arg);
+    errval_t err = SYS_ERR_OK;
+    struct lmp_chan* lc = (struct lmp_chan*) arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+
+    // Retrieve capability and arguments.
+    err = lmp_chan_recv(lc, &msg, &cap);
+
+    if (err_is_fail(err) && lmp_err_is_transient(err)) {
+        // reregister
+        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+    }
+
+    uint32_t type = msg.words [0];
+
+    switch (type)
+    {
+        // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
+        // otherwise control will be transfered back to sender immediately...
+
+        case AOS_PING:
+            // Send a response to the ping request.
+            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
+
+            // Delete capability and reuse slot.
+            err = cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
+            break;
+        case AOS_RPC_GET_RAM_CAP:;
+            size_t bits = msg.words [1];
+            struct capref ram;
+            errval_t error = ram_alloc (&ram, bits);
+
+            lmp_chan_send2 (lc, 0, ram, error, bits);
+
+            //TODO: do we need to destroy ram capability here?
+//          error = cap_destroy (ram);
+
+            debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
+            break;
+
+        case AOS_RPC_SEND_STRING:;
+            // TODO: maybe store the string somewhere else?
+
+            // Enlarge receive buffer if necessary.
+            uint32_t char_count = (LMP_MSG_LENGTH - 1) * sizeof (uint32_t);
+
+            if (example_index + char_count + 1 >= example_size) {
+                example_str = realloc(example_str, example_size * 2);
+                memset(&example_str[example_size], 0, example_size);
+                example_size *= 2;
+            }
+
+            memcpy(&example_str[example_index], &msg.words[1], char_count);
+            example_index += char_count;
+
+            // Append a null character to safely print the string.
+            example_str [example_index] = '\0';
+            // debug_printf ("Handled AOS_RPC_SEND_STRING with string: %s\n", example_str + example_index - char_count);
+            if (example_str [example_index - 1] == '\0') {
+                debug_printf ("Received last chunk. Contents: \n");
+                printf("%s\n", example_str);
+            }
+            break;
+        case AOS_ROUTE_REGISTER_SERVICE:;
+            debug_printf ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);
+            assert (capref_is_null (cap));
+            services [msg.words [1]] = lc;
+            lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
+            break;
+        case AOS_RPC_SERIAL_PUTCHAR:;
+//             debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
+            char output_character = msg.words [1];
+            uart_putchar (output_character);
+            break;
+        case AOS_RPC_SERIAL_GETCHAR:;
+//             debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
+            char input_character = uart_getchar ();
+            lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
+            break;
+        case AOS_RPC_CONNECTION_INIT:;
+            debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
+            lc->remote_cap = cap;
+            err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
+            err = lmp_chan_send1 (lc, 0, NULL_CAP, err);
+            break;
+
+        case AOS_ROUTE_FIND_SERVICE:;
+            debug_printf ("Got AOS_ROUTE_FIND_SERVICE\n");
+            // generate new ID
+            uint32_t id = find_request_index;
+            find_request_index++;
+            // store current channel at ID
+            find_request [id] = lc;
+            // find correct server channel
+            uint32_t requested_service = msg.words [1];
+            struct lmp_chan* serv = services [requested_service];
+            // generate AOS_ROUTE_REQUEST_EP request with ID.
+            if (serv != NULL) {
+                lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
+            } else {
+                debug_printf ("ERROR! Service 0x%x is unknown\n", requested_service);    
+            }
+            break;
+        case AOS_ROUTE_REQUEST_EP:;
+            // NOTE: implemented by all servers, and init usually doesn't handle this.
+            debug_printf ("Got AOS_ROUTE_REQUEST_EP\n");
+            // Extract request ID
+            // Create a new endpoint with accept (using NULL_CAP)
+            // Generate answer with AOS_ROUTE_DELIVER_EP, error value and request ID
+            break;
+        case AOS_ROUTE_DELIVER_EP:;
+            debug_printf ("Got AOS_ROUTE_DELIVER_EP\n");
+            // get error value and ID from message
+            errval_t error_ret = msg.words [1];
+            id = msg.words [2];
+            // lookup receiver channel at ID
+            struct lmp_chan* recv = find_request [id]; // TODO: delete id
+            // generate response with cap and error value
+            lmp_chan_send1 (recv, 0, cap, error_ret);
+            // Delete cap and reuse slot
+            err = cap_delete (cap);
+            lmp_chan_set_recv_slot (lc, cap);
+            lmp_chan_alloc_recv_slot (lc);
+            break;
+        case AOS_RPC_SPAWN_PROCESS:;
+            int       idx    = -1                   ;
+            char    * name   = (char*)&msg.words [1];
+            errval_t  status = -1                   ;
+
+            debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
+
+            // Lookup of free process slot in process database
+            for (int i = 0; (i < COUNT_OF(ddb)) && (idx == -1); i++) {
+                if (ddb[i].name[0] == '\0') {
+                    idx = i;
+                }
+            }
+            
+            debug_printf ("                          <- 0x%x\n", idx);
+
+            if (idx != -1) {
+                // Spawn new process
+                status = spawn_with_channel(name, &ddb[idx].channel);
+            }    
+            
+            // Send reply back to the client
+            lmp_chan_send2(lc, 0, NULL_CAP, status, idx);            
+            break;
+        case AOS_RPC_GET_PROCESS_NAME:;
+            domainid_t pid    = msg.words [1];
+            
+            status = -1;
+
+            debug_printf ("Got AOS_RPC_GET_PROCESS_NAME <== 0x%x\n", pid);
+
+            if ((pid < COUNT_OF(ddb)) && (ddb[pid].name[0] != '\0')) {
+                uint32_t args[8];
+                int      indx    = 0;
+            
+                str_to_args(ddb[pid].name, args, COUNT_OF(args), &indx, false);
+                   
+                lmp_chan_send9 (lc, 0, NULL_CAP, 0, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+            } else {
+                lmp_chan_send1 (lc, 0, NULL_CAP, -1);
+            }
+            break;
+        case AOS_RPC_GET_PROCESS_LIST:;
+            debug_printf ("Got AOS_RPC_GET_PROCESS_LIST\n");
+            lmp_chan_send1 (lc, 0, NULL_CAP, -1); // Unimplemented
+            break;
+        default:
+            // YK: Uncomment this if you really need it.
+            //debug_printf ("Got default value\n");
+            if (! capref_is_null (cap)) {
+                cap_delete (cap);
+                lmp_chan_set_recv_slot (lc, cap);
+            }
+    }
+    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+}
+
+/**
+ * Set up the user-level data structures for the
+ * kernel-created endpoint for init.
+ */
+__attribute__((unused))
+static errval_t initep_setup (void)
+{
+    errval_t err = SYS_ERR_OK;
+
+    // Allocate an LMP channel and do basic initializaton.
+    // TODO; maybe make the allocated channel structure available somewhere.
+    struct lmp_chan* channel = malloc (sizeof (struct lmp_chan));
+
+    if (channel != NULL) {
+        lmp_chan_init (channel);
+
+        // make local endpoint available -- this was minted in the kernel in a way
+        // such that the buffer is directly after the dispatcher struct and the
+        // buffer length corresponds DEFAULT_LMP_BUF_WORDS (excluding the kernel
+        // sentinel word).
+
+        // NOTE: lmp_endpoint_setup automatically adds the dispatcher offset.
+        // Thus the offset of the first endpoint structure is zero.
+
+        struct lmp_endpoint* endpoint; // Structure to be filled in.
+        err = lmp_endpoint_setup (0, DEFAULT_LMP_BUF_WORDS, &endpoint);
+
+        if (err_is_fail(err)) {
+            debug_printf ("ERROR: On endpoint setup.\n");
+
+        } else {
+            // Update the channel with the newly created endpoint.
+            channel->endpoint  = endpoint;
+            // The channel needs to know about the (kernel-created) capability to receive objects.
+            channel->local_cap = cap_initep;
+
+            // Allocate a slot for incoming capabilities.
+            err = lmp_chan_alloc_recv_slot(channel);
+            if (err_is_fail(err)) {
+                debug_printf ("ERROR: On allocation of recv slot.\n");
+
+            } else {
+                // Register a receive handler.
+                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
+                if (err_is_fail(err))
+                {
+                    debug_printf ("ERROR: On channel registration.\n");
+                }
+            }
+        }
+    } else {
+        // malloc returned NULL...
+        err = LIB_ERR_MALLOC_FAIL;
+    }
+    return err;
+} //*/
+
 int main(int argc, char *argv[])
 {
     errval_t err;
@@ -397,7 +468,6 @@ int main(int argc, char *argv[])
 
     // Initialize the serial driver.
     if (err_is_ok (err)) {
-//         err = spawn_serial_driver ();
         init_uart_driver ();
     }
 
@@ -407,28 +477,11 @@ int main(int argc, char *argv[])
     debug_printf("initialized dev memory management\n");
 
 
-    // TODO (milestone 3) STEP 2:
-
     // Set up some data structures for RPC services.
     init_data_structures ();
 
-    // Set up init's kernel-created endpoint.
-//     err = initep_setup ();
-//     if (err_is_fail (err)) {
-//         debug_printf ("FATAL: Could not set up init endpoint\n");
-//         abort();
-//     }
-
-    // Spawn a user-level thread.
-    // NOTE: This thread is linked to a routine in memeater that tests this thread.
-//     err = spawn_test_thread(recv_handler);
-
     struct lmp_chan memeater_chan;
     spawn_with_channel ("memeater", &memeater_chan);
-
-    struct lmp_chan test_domain_chan;
-    err = spawn_with_channel ("test_domain", &test_domain_chan);
-    debug_printf ("test_domain: %s\n", err_getstring (err));
 
     // Go into messaging main loop.
     while (true) {

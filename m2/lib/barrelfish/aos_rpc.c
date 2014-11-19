@@ -151,6 +151,22 @@ static errval_t aos_send_receive (struct lmp_message_args* storage, bool needs_r
     return error;
 }
 
+static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
+{
+    finished = false;
+
+    for (int i = 0; (i < args_length) && (finished == false); i++) {
+        for (int j = 0; (j < 4) && (finished == false); j++, (*indx)++) {
+            args[i] |= (uint32_t)(string[*indx]) << (8 * j);
+
+            if ((string[*indx] == '\0') && (finished == false)) {
+                finished = true;
+            }
+        }
+    }
+
+    return finished;
+}
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
@@ -167,19 +183,8 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
         for (; finished == false ;) {
             uint32_t buf[LMP_MSG_LENGTH] = {AOS_RPC_SEND_STRING,0,0,0,0,0,0,0,0};
 	
-            for (int i = 1; (i < (sizeof(buf)/sizeof(buf[0]))) && (finished == false); i++) {
-                for (int j = 0; j < 4; j ++) {
-                    buf[i] |= (uint32_t)(string[indx]) << (8 * j);
-
-                    if (string[indx] == '\0' && !finished) {
-                        finished = true;
-                        debug_printf_quiet ("last_message\n");
-                    }
-
-                    indx++;
-                }
-            }
-
+            finished = str_to_args(&string[indx], &buf[1], 8, &indx, finished);
+            
             error = lmp_chan_send9(&chan->channel, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
             debug_printf_quiet ("transferred 32 bytes: %s\n", err_getstring (error));
 
@@ -287,26 +292,32 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *new
     // Request a creation of new process from the binary packed into boot image.
     errval_t error = -1; // Consider -1 as a sign of general error
 
-    if (chan != NULL && name != NULL && (newpid != NULL)) {
-        struct lmp_message_args  args   ;
-        struct lmp_chan        * channel = &chan->channel;
+    if ((chan != NULL) && (name != NULL) && (newpid != NULL)) {
+        if (strlen(name) <= MAX_PROCESS_NAME_LENGTH) {
+            struct lmp_message_args  args   ;
+            struct lmp_chan        * channel = &chan->channel;
+
+            int indx = 0;
     
-        init_lmp_message_args (&args, channel);
+            init_lmp_message_args (&args, channel);
 
-        args.message.words [0] = AOS_RPC_SPAWN_PROCESS;
+            args.message.words [0] = AOS_RPC_SPAWN_PROCESS;
 
-        // Do the IPC call.
-        error = aos_send_receive(&args, true);
-        print_error (error, "aos_rpc_process_spawn: communication failed. %s\n", err_getstring (error));
+            str_to_args(&name[indx], &args.message.words[1], 8, &indx, false);
+            
+            // Do the IPC call.
+            error = aos_send_receive(&args, true);
+            print_error (error, "aos_rpc_process_spawn: communication failed. %s\n", err_getstring (error));
 
-        // Get the result.
-        if (err_is_ok (error)) {
-
-            error = args.message.words [0];
-            print_error (error, "aos_rpc_process_spawn: operation failed. %s\n", err_getstring (error));
-
+            // Get the result.
             if (err_is_ok (error)) {
-                *newpid = args.message.words [1];
+
+                error = args.message.words [0];
+                print_error (error, "aos_rpc_process_spawn: operation failed. %s\n", err_getstring (error));
+
+                if (err_is_ok (error)) {
+                    *newpid = args.message.words [1];
+                }
             }
         }
     }
@@ -317,16 +328,70 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *new
 errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
                                   char **name)
 {
-    // TODO (milestone 5): implement name lookup for process given a process
-    // id
-    return SYS_ERR_OK;
+    // Name lookup for process given a process id
+    errval_t error = -1; // Consider -1 as a sign of general error
+    
+    if ((chan != NULL) && (name != NULL)) {
+        struct lmp_message_args  args   ;
+        struct lmp_chan        * channel = &chan->channel;
+    
+        init_lmp_message_args (&args, channel);
+
+        args.message.words [0] = AOS_RPC_GET_PROCESS_NAME;
+
+        // Do the IPC call.
+        error = aos_send_receive(&args, true);
+        print_error (error, "aos_rpc_process_get_name: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+
+            error = args.message.words [0];
+            print_error (error, "aos_rpc_process_get_name: operation failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                *name = malloc(MAX_PROCESS_NAME_LENGTH);
+                strcpy(*name, (char*)&args.message.words [1]);
+                // TODO
+            }
+        }
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
                                       domainid_t **pids, size_t *pid_count)
 {
-    // TODO (milestone 5): implement process id discovery
-    return SYS_ERR_OK;
+    // Process id discovery
+    errval_t error = -1; // Consider -1 as a sign of general error
+    
+    if ((chan != NULL) && (pids != NULL) && (pid_count != NULL)) {
+        struct lmp_message_args  args   ;
+        struct lmp_chan        * channel = &chan->channel;
+    
+        init_lmp_message_args (&args, channel);
+
+        args.message.words [0] = AOS_RPC_GET_PROCESS_LIST;
+
+        // Do the IPC call.
+        error = aos_send_receive(&args, true);
+        print_error (error, "aos_rpc_process_get_all_pids: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+
+            error = args.message.words [0];
+            print_error (error, "aos_rpc_process_get_all_pids: operation failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                //newpid = args.message.words [1];
+                // TODO
+            }
+        }
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_open(struct aos_rpc *chan, char *path, int *fd)

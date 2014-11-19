@@ -29,6 +29,8 @@ enum aos_service {
     aos_service_guard
 };
 
+#define MAX_PROCESS_NAME_LENGTH (7 * 4 - 1)
+
 // Basic protocol:
 // The first argument is the type of message.
 // If there's a reply, the first argument is an errval_t. // TODO: this is currently not always implemented.

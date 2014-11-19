@@ -454,7 +454,7 @@ schedsim-check: $(wildcard $(SRCDIR)/tools/schedsim/*.cfg)
 # TODO: add different modules here depending on
 # the milestone you're working on
 
-PANDABOARD_MODULES=         \
+PANDABOARD_MODULES=\
 	armv7/sbin/cpu_omap44xx \
 	armv7/sbin/init         \
     armv7/sbin/memeater     \
