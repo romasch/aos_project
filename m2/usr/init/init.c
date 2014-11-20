@@ -479,6 +479,10 @@ int main(int argc, char *argv[])
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
     err = initialize_device_frame_server (cap_io);
 
+    // Initialize the LED driver.
+    led_init ();
+    led_set_state (true);
+
     // Initialize the serial driver.
     if (err_is_ok (err)) {
         init_uart_driver ();

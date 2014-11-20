@@ -39,4 +39,9 @@ errval_t spawn_serial_driver_thread (void);
 // A test thread for init.
 errval_t spawn_test_thread ( void (*handler_func) (void* arg));
 
+
+// LED controls:
+errval_t led_init (void);
+void led_set_state (bool new_state);
+
 #endif // INIT_H
