@@ -25,7 +25,7 @@
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
 
 // Default page count for refill requests by slab data structures.
-#define SLAB_REFILL_PAGE_COUNT 32u
+#define SLAB_REFILL_PAGE_COUNT 64u
 
 // Predefined paging region for slot allocator.
 // This is defined by us as a workaround to a bug.
@@ -717,7 +717,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
 //         // Return frame cap and report error.
 //         cap_destroy (new_frame);
 //     }
-
+//     debug_printf ("paging :: %s\n", err_getstring (error));
     PRINT_EXIT (error);
     return error;
 }

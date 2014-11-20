@@ -339,6 +339,7 @@ errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
         init_lmp_message_args (&args, channel);
 
         args.message.words [0] = AOS_RPC_GET_PROCESS_NAME;
+        args.message.words [1] = pid;
 
         // Do the IPC call.
         error = aos_send_receive(&args, true);
@@ -555,7 +556,6 @@ errval_t aos_rpc_set_led (struct aos_rpc* rpc, bool new_state)
     init_lmp_message_args (&args, channel);
 
     // Set up the arguments according to the convention.
-    args.cap = channel -> local_cap;
     args.message.words [0] = AOS_RPC_SET_LED;
     args.message.words [1] = new_state;
 
@@ -584,7 +584,6 @@ errval_t aos_rpc_set_foreground (struct aos_rpc* rpc, domainid_t domain)
     init_lmp_message_args (&args, channel);
 
     // Set up the arguments according to the convention.
-    args.cap = channel -> local_cap;
     args.message.words [0] = AOS_RPC_SET_FOREGROUND;
     args.message.words [1] = domain;
 
@@ -612,7 +611,6 @@ errval_t aos_rpc_kill (struct aos_rpc* rpc, domainid_t domain)
     init_lmp_message_args (&args, channel);
 
     // Set up the arguments according to the convention.
-    args.cap = channel -> local_cap;
     args.message.words [0] = AOS_RPC_KILL;
     args.message.words [1] = domain;
 

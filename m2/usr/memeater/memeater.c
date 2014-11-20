@@ -169,8 +169,9 @@ static void start_shell (void)
             aos_rpc_set_led (led_channel, false);
         } else if (starts_with ("ps"         , buf) != false) {
             print_process_list();
-        } else if (starts_with ("kill", buf)) {
-            aos_rpc_kill (pm_channel, 2);
+        } else if (starts_with ("kill ", buf)) {
+            int number = atoi(&buf[5]);
+            aos_rpc_kill (pm_channel, number);
         } else if (starts_with ("ping", buf)) {
             test_routing_to_domain();
         } else {

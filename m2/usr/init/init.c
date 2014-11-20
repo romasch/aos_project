@@ -62,6 +62,16 @@ struct lmp_chan* services [aos_service_guard];
 static struct lmp_chan* find_request [100];
 static int find_request_index = 0;
 
+// Keep track of mapped modules.
+struct module_map_entry {
+    char name [MAX_PROCESS_NAME_LENGTH + 1];
+    struct mem_region* module;
+    lvaddr_t binary;
+    size_t binary_size;
+};
+static struct module_map_entry module_map [32];
+static int module_map_size = 0;
+
 /**
  * Initialize some data structures.
  */
@@ -76,6 +86,7 @@ static void init_data_structures (void)
     for (int i=0; i<aos_service_guard; i++) {
         services [i] = NULL;
     }
+    memset (&module_map, 0, sizeof (module_map));
 
     example_index =          0 ;
     example_size  =        128 ;
@@ -100,6 +111,7 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     // Struct to keep track of new domains cspace, vspace, etc...
     struct spawninfo new_domain;
     memset (&new_domain, 0, sizeof (struct spawninfo));
+    new_domain.domain_id = domain_id;
 
     // Concatenate the name.
     char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
@@ -108,16 +120,67 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
 
     //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
     // Try to find a better suited function
-    error = spawn_load_with_bootinfo (&new_domain, bi, prefixed_name, my_core_id);
-    debug_printf ("error: %s\n", err_getstring (error));
+//     error = spawn_load_with_bootinfo (&new_domain, bi, prefixed_name, my_core_id);
+
+    // Find the module.
+    struct mem_region* module = NULL;
+    lvaddr_t binary = 0;
+    size_t binary_size = 0;
+
+    for (int i=0; i<module_map_size; i++) {
+        if (strcmp (module_map [i].name, domain_name) == 0)  {
+            module = module_map [i].module;
+            binary = module_map [i].binary;
+            binary_size = module_map [i].binary_size;
+            break;
+        }
+    }
+    // Not found. Try bootinfo.
+    if (!module) {
+        module = multiboot_find_module(bi, prefixed_name);
+        if (module == NULL) {
+            debug_printf("could not find module [%s] in multiboot image\n", prefixed_name);
+            error = SPAWN_ERR_FIND_MODULE;
+        } else {
+            // Lookup and map the elf image
+            error = spawn_map_module(module, &binary_size, &binary, NULL);
+            if (err_is_fail(error)) {
+                error = err_push(error, SPAWN_ERR_ELF_MAP);
+            } else {
+                strcpy ( module_map [module_map_size].name, domain_name);
+                module_map [module_map_size].module = module;
+                module_map [module_map_size].binary = binary;
+                module_map [module_map_size].binary_size = binary_size;
+                module_map_size++;
+            }
+        }
+    }
+    char* argv [] = {domain_name, NULL};
+    char* envp [] = {NULL};
+
+    if (err_is_ok (error)) {
+        error = spawn_load_image (
+            &new_domain,
+            binary,
+            binary_size,
+            CPU_ARM,
+            domain_name,
+            my_core_id,
+            argv,
+            envp,
+            NULL_CAP,
+            NULL_CAP
+        );
+    }
 
     // Set data structures.
-    new_domain.domain_id = domain_id;
-    get_dispatcher_generic (new_domain.handle)->domain_id = domain_id;
-    if (ret_dispatcher) {
+    if (err_is_ok(error) && ret_dispatcher) {
         // TODO; error handling. Also, it may be possible to not delete new_domain.dcb
+        get_dispatcher_generic (new_domain.handle)->domain_id = domain_id;
         slot_alloc (ret_dispatcher);
         cap_copy (*ret_dispatcher, new_domain.dcb);
+    } else {
+        return error;
     }
 
     // Initialize memeater.
@@ -318,7 +381,6 @@ static void recv_handler (void *arg)
         case AOS_RPC_SPAWN_PROCESS:;
             int       idx    = -1                   ;
             char    * name   = (char*)&msg.words [1];
-            errval_t  status = -1                   ;
 
             //DBG: debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
 
@@ -330,19 +392,17 @@ static void recv_handler (void *arg)
             }
             
             if (idx != -1) {
-                status = spawn_with_channel(name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
-                if (!err_is_fail(err)) {
+                err = spawn_with_channel(name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
+                if (err_is_ok(err)) {
                     strcpy(ddb[idx].name, name);
                 }
             }    
             
             // Send reply back to the client
-            lmp_chan_send2(lc, 0, NULL_CAP, status, idx);
+            lmp_chan_send2(lc, 0, NULL_CAP, err, idx);
             break;
         case AOS_RPC_GET_PROCESS_NAME:;
             domainid_t pid    = msg.words [1];
-            
-            status = -1;
 
             //DBG: debug_printf ("Got AOS_RPC_GET_PROCESS_NAME <== 0x%x\n", pid);
 
@@ -366,8 +426,8 @@ static void recv_handler (void *arg)
             for (int i = msg.words [1]; (i < COUNT_OF(ddb)) && (didx < COUNT_OF(args)); i++) {
                 if (ddb[i].name[0] != '\0') {
                     args[didx] = i;
-                    idx  = i + 1;
                     didx++;
+                    idx  = i + 1;
                 }
             }
 
