@@ -16,6 +16,7 @@ extern size_t (*_libc_terminal_write_func)(const char *, size_t);
 static struct aos_rpc* serial_channel;
 static struct aos_rpc* test_channel  ;
 static struct aos_rpc* pm_channel    ;
+static struct aos_rpc* led_channel;
 
 static bool starts_with(const char *prefix, const char *str)
 {
@@ -62,6 +63,7 @@ static void start_shell (void)
     while (true) {
         bool finished = false;
         int  i        = 0    ;
+        aos_rpc_serial_putchar (serial_channel, '$');
 
         // Collect input characters in the string buffer until the moment
         // when we will have 'carriage return' character.
@@ -100,8 +102,12 @@ static void start_shell (void)
             }
         } else if (starts_with ("exit", buf) != false) {
             break;
+        } else if (starts_with ("ledon", buf)) {
+            aos_rpc_set_led (led_channel, true);
+        } else if (starts_with ("ledoff", buf)) {
+            aos_rpc_set_led (led_channel, false);
         } else {
-            // ignore
+            printf ("Unknown command.\n");
         }
     }
 }
@@ -112,6 +118,7 @@ int main(int argc, char *argv[])
     pm_channel     = aos_rpc_get_init_channel ();
     serial_channel = aos_rpc_get_init_channel ();
     test_channel   = aos_rpc_get_init_channel ();
+    led_channel = aos_rpc_get_init_channel ();
 
 
     errval_t error = SYS_ERR_OK;

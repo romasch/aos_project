@@ -361,6 +361,10 @@ static void recv_handler (void *arg)
 
             lmp_chan_send9 (lc, 0, NULL_CAP, 0, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             break;
+        case AOS_RPC_SET_LED:;
+            bool state = msg.words [1];
+            led_set_state (state);
+            lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
         default:
             // YK: Uncomment this if you really need it.
             //debug_printf ("Got default value\n");

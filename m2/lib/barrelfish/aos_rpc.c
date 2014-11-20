@@ -538,8 +538,34 @@ errval_t aos_ping (struct aos_rpc* chan, uint32_t value)
     errval_t error = aos_send_receive (&args, false);
 
     // Check for errors.
-    print_error (error, "aos_ping: %s\n");
+    print_error (error, "aos_ping: %s\n", err_getstring (error));
     assert (args.message.words[0] == value); // maybe use something less deadly...
+    return error;
+}
+
+
+errval_t aos_rpc_set_led (struct aos_rpc* rpc, bool new_state)
+{
+    debug_printf_quiet ("aos_rpc_set_led...\n");
+
+    struct lmp_chan* channel = &rpc->channel;
+    // Provide a set of message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the arguments according to the convention.
+    args.cap = channel -> local_cap;
+    args.message.words [0] = AOS_RPC_SET_LED;
+    args.message.words [1] = new_state;
+
+    // Do the actual IPC call.
+    errval_t error = aos_send_receive (&args, false);
+
+    // Check if there's an error.
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+    }
+    print_error (error, "aos_rpc_set_led: %s\n", err_getstring (error));
     return error;
 }
 

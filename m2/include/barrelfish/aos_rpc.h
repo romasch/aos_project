@@ -22,6 +22,7 @@
 enum aos_service {
     aos_service_ram = 0,
     aos_service_serial,
+    aos_service_led,
     //...
 
     aos_service_test,
@@ -202,6 +203,18 @@ enum aos_service {
  */
 #define AOS_RPC_GET_PROCESS_LIST 12
 
+/**
+ * Turn the LED on or off.
+ *
+ * Type: Synchronous
+ * Target: LED driver.
+ * Send Args: A boolean indicating if the LED should be on (true) or off (false).
+ * Send Capability: -
+ * Receive Args: error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_SET_LED 13
+
 
 struct aos_rpc {
     struct lmp_chan channel;
@@ -371,7 +384,10 @@ errval_t aos_find_service (uint32_t service, struct capref* endpoint);
  */
 errval_t aos_register_service (struct aos_rpc* rpc, uint32_t service);
 
-
+/**
+ * \brief Turn the LED on or off.
+ */
+errval_t aos_rpc_set_led (struct aos_rpc* rpc, bool new_state);
 
 /**
  * Ping a domain.
