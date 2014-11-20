@@ -103,6 +103,14 @@ static void execute_external_command(char* const cmd)
     domainid_t  pid  ;
     bool     success = false;
 
+    bool background = false;
+
+    for (int i=0; cmd[i] != '\0'; i++) {
+        if (cmd[i] == '&') {
+            background = true;
+        }
+    }
+
     for (int i = 0; cmd[i] != '\0'; i++) {
         if ((isalnum((int)cmd[i]) == false) && (cmd[i] != '-') && (cmd[i] != '_')) {
             cmd[i] = '\0';
@@ -114,6 +122,13 @@ static void execute_external_command(char* const cmd)
     if (err_is_fail (err) == false) {
         success = true;
     }
+
+    if (!background && success) { // not background
+        aos_rpc_set_foreground (serial_channel, pid);
+        aos_rpc_wait_for_termination (pm_channel, pid);
+        aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
+    }
+
 
     if (success == false) {
         printf ("Unknown command.\n");
@@ -192,6 +207,7 @@ int main(int argc, char *argv[])
     aos_find_service (aos_service_serial, &serial_ep);
     serial_channel = malloc (sizeof (struct aos_rpc));
     aos_rpc_init (serial_channel, serial_ep);
+    aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
 
 
     errval_t error = SYS_ERR_OK;

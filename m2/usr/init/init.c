@@ -40,6 +40,7 @@ struct ddb_entry
     char name[MAX_PROCESS_NAME_LENGTH + 1];
     struct capref dispatcher_frame;
     struct lmp_chan channel;
+    struct lmp_chan* termination_observer;
 };
 
 static struct ddb_entry ddb[32];
@@ -461,11 +462,26 @@ static void recv_handler (void *arg)
             error = cap_revoke (ddb [pid_to_kill].dispatcher_frame);
             error = cap_delete (ddb [pid_to_kill].dispatcher_frame);
             ddb [pid_to_kill].name[0] = '\0';
+
+            // Notify the observer about termination.
+            if (ddb [pid_to_kill].termination_observer) {
+                lmp_chan_send1 (ddb [pid_to_kill].termination_observer, 0, NULL_CAP, SYS_ERR_OK);
+            }
+
             // TODO: properly clean up processor, i.e. its full cspace.
             break;
         case AOS_RPC_SET_FOREGROUND:;
             debug_printf ("TODO\n");
             break;
+
+        case AOS_RPC_WAIT_FOR_TERMINATION:;
+            uint32_t pid_to_wait = msg.words [1];
+            if (ddb [pid_to_wait].name[0] == '\0') {
+                // Domain is already dead!
+                lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
+            } else {
+                ddb [pid_to_wait].termination_observer = lc;
+            }
         default:
             // YK: Uncomment this if you really need it.
             //debug_printf ("Got default value\n");

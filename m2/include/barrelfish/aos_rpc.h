@@ -254,6 +254,19 @@ enum aos_service {
  */
 #define AOS_RPC_GET_DEVICE_FRAME 16
 
+/**
+ * Wait for termination of a process.
+ *
+ * Type: Synchronous
+ * Target: Process manager
+ * Send Args: Domain ID
+ * Send Capability: -
+ * Receive Args: error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_WAIT_FOR_TERMINATION 17
+
+
 struct aos_rpc {
     struct lmp_chan channel;
     // TODO: add state for your implementation
@@ -442,6 +455,12 @@ errval_t aos_rpc_kill (struct aos_rpc*, domainid_t domain);
  * Internally uses kill.
  */
 void aos_rpc_exit (struct aos_rpc* rpc);
+
+/**
+ * \brief Block until domain terminates.
+ */
+errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain);
+
 
 /**
  * Ping a domain.

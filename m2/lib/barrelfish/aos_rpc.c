@@ -674,6 +674,31 @@ void aos_rpc_exit (struct aos_rpc* rpc)
     lmp_chan_send2 (channel, LMP_SEND_FLAGS_DEFAULT, NULL_CAP, AOS_RPC_KILL, disp_get_domain_id());
 }
 
+
+errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain)
+{
+    debug_printf_quiet ("aos_rpc_wait_for_termination...\n");
+
+    struct lmp_chan* channel = &rpc->channel;
+    // Provide a set of message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the arguments according to the convention.
+    args.message.words [0] = AOS_RPC_WAIT_FOR_TERMINATION;
+    args.message.words [1] = domain;
+
+    // Do the actual IPC call.
+    errval_t error = aos_send_receive (&args, false);
+
+    // Check if there's an error.
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+    }
+    print_error (error, "aos_rpc_wait_for_termination: %s\n", err_getstring (error));
+    return error;
+}
+
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 {
     // Initialize channel to receiver.
