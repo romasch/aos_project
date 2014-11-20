@@ -1,4 +1,5 @@
 #include <barrelfish/barrelfish.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -48,13 +49,83 @@ static size_t aos_rpc_terminal_read (char *buf, size_t len)
 
 static void test_routing_to_domain (void);
 
+static void run_memtest(const char* const buf)
+{
+    int number = atoi(&buf[12]); 
+            
+    if (number > 0) {
+        debug_printf ("Running memtest.\n");
+        char* mbuf = malloc (number);
+        for (int mi=0; mi<number; mi++) {
+            mbuf[mi] = mi % 255;
+        }
+        free (mbuf);
+        debug_printf ("Memtest finished.\n");
+    }
+}
+
+static void print_process_list(void)
+{
+    size_t      count;
+    errval_t    err  ;
+    domainid_t* pids ;
+
+    printf(" PID\t\tName\n");
+
+    err = aos_rpc_process_get_all_pids(pm_channel, &pids, &count);
+    if (err_is_fail (err)) {
+        printf("\t ERROR: Failed to get a process list from the Process Manager (0x%x).\n", err);
+    } else {
+        printf("=================================\n");
+
+        for (int i = 0; i < count; i++) {
+            char* name = NULL;
+
+            err = aos_rpc_process_get_name(pm_channel, pids[i], &name);
+            if (err_is_fail(err)) {
+                printf(" %u\t\t---- Unknown process ----\n", pids[i]      );
+            } else {
+                printf(" %u\t\t%s\n"                       , pids[i], name);
+
+                free(name);
+            }
+        }
+        
+        printf("---------------------------------\n");
+
+        free(pids);
+    }
+}
+
+static void execute_external_command(char* const cmd)
+{
+    errval_t err    ; 
+    domainid_t  pid  ;
+    bool     success = false;
+
+    for (int i = 0; cmd[i] != '\0'; i++) {
+        if ((isalnum((int)cmd[i]) == false) && (cmd[i] != '-') && (cmd[i] != '_')) {
+            cmd[i] = '\0';
+            i--;
+        }
+    }
+    
+    err = aos_rpc_process_spawn(pm_channel, cmd, &pid);
+    if (err_is_fail (err) == false) {
+        success = true;
+    }
+
+    if (success == false) {
+        printf ("Unknown command.\n");
+    }
+}
+
 /**
  * A simple shell that handles echo, run_memtest and exit commands.
  */
 static void start_shell (void)
 {
     char buf[256];
-    int  number   = 0;
         
     debug_printf ("Started simple shell...\n");
     
@@ -86,28 +157,20 @@ static void start_shell (void)
         }
         
         // Start statement processing.
-        if (starts_with("echo", buf) != false) {
+        if (       starts_with("echo"        , buf) != false) {
             printf ("echo: %s", &buf[5]);
         } else if (starts_with("run_memtest ", buf) != false) {
-            number = atoi(&buf[12]); 
-            
-            if (number > 0) {
-                debug_printf ("Running memtest.\n");
-                char* mbuf = malloc (number);
-                for (int mi=0; mi<number; mi++) {
-                    mbuf[mi] = mi % 255;
-                }
-                free (mbuf);
-                debug_printf ("Memtest finished.\n");
-            }
-        } else if (starts_with ("exit", buf) != false) {
+            run_memtest(buf);
+        } else if (starts_with ("exit"       , buf) != false) {
             break;
-        } else if (starts_with ("ledon", buf)) {
+        } else if (starts_with ("ledon"      , buf) != false) {
             aos_rpc_set_led (led_channel, true);
-        } else if (starts_with ("ledoff", buf)) {
+        } else if (starts_with ("ledoff"     , buf) != false) {
             aos_rpc_set_led (led_channel, false);
+        } else if (starts_with ("ps"         , buf) != false) {
+            print_process_list();
         } else {
-            printf ("Unknown command.\n");
+            execute_external_command(&buf[0]);
         }
     }
 }
@@ -227,7 +290,8 @@ int main(int argc, char *argv[])
 static void test_routing_to_domain (void)
 {   
     // Test routing
-    for (bool success = false; success == false;) {
+    //for (bool success = false; success == false;) {
+    for (int = 0; i < 100; i++) {
         errval_t error;
         struct capref test_domain;
         error = aos_find_service (aos_service_test, &test_domain);

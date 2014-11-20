@@ -389,7 +389,7 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
                 for (int i = 0; i < 7; i++) {
                     if (args.message.words[2 + i] != 0xffffffff) {
                         if ((*pid_count & (*pid_count - 1)) == 0) {
-                            *pids = realloc(*pids, (*pid_count == 0) ? (1) : (*pid_count * 2));
+                            *pids = realloc(*pids, sizeof(domainid_t) * ((*pid_count == 0) ? (1) : (*pid_count * 2)));
                         }
 
                         (*pids)[*pid_count] = args.message.words[2 + i];
