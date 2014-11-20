@@ -242,6 +242,18 @@ enum aos_service {
  */
 #define AOS_RPC_SET_FOREGROUND 15
 
+/**
+ * Get a device frame capability.
+ *
+ * Type: Synchronous
+ * Target: Device frame manager (= init)
+ * Send Args: Physical Address Base, Size Bits
+ * Send Capability: -
+ * Receive Args: error value
+ * Receive Capability: device frame cap
+ */
+#define AOS_RPC_GET_DEVICE_FRAME 16
+
 struct aos_rpc {
     struct lmp_chan channel;
     // TODO: add state for your implementation

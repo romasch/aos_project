@@ -239,8 +239,45 @@ errval_t aos_rpc_get_dev_cap(struct aos_rpc *chan, lpaddr_t paddr,
                              size_t length, struct capref *retcap,
                              size_t *retlen)
 {
-    // TODO (milestone 4): implement functionality to request device memory
-    // capability.
+    assert (retcap);
+    // Request device memory capability.
+    struct lmp_chan* channel = &chan->channel;
+    errval_t error = SYS_ERR_OK;
+
+    // Initialize storage for message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the send arguments.
+    uint8_t length_bits = log2ceil (length);
+    if (length_bits < BASE_PAGE_BITS) {
+        length_bits = BASE_PAGE_BITS;
+    }
+
+    args.message.words [0] = AOS_RPC_GET_DEVICE_FRAME;
+    args.message.words [1] = paddr;
+    args.message.words [2] = length_bits;
+
+
+    // Do the IPC call.
+    error = aos_send_receive (&args, true);
+    print_error (error, "aos_rpc_get_dev_cap: communication failed. %s\n", err_getstring (error));
+
+    // Get the result.
+    if (err_is_ok (error)) {
+
+        error = args.message.words [0];
+        print_error (error, "aos_rpc_get_dev_cap: operation failed. %s\n", err_getstring (error));
+
+        if (err_is_ok (error)) {
+            *retcap = args.cap;
+            if (retlen) {
+                *retlen = 1u << length_bits;
+            }
+        }
+    }
+    return error;
+
     return SYS_ERR_OK;
 }
 

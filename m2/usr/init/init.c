@@ -322,6 +322,20 @@ static void recv_handler (void *arg)
             services [msg.words [1]] = lc;
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
             break;
+        case AOS_RPC_GET_DEVICE_FRAME:;
+            uint32_t device_addr = msg.words [1];
+            uint8_t device_bits = msg.words [2];
+            struct capref device_frame;
+            error = allocate_device_frame (device_addr, device_bits, &device_frame);
+
+            lmp_chan_send1 (lc, 0, device_frame, error);
+
+            //TODO: do we need to destroy frame capability here?
+//          error = cap_destroy (device_frame);
+
+            debug_printf ("Handled AOS_RPC_GET_DEVICE_FRAME: %s\n", err_getstring (error));
+            break;
+
         case AOS_RPC_SERIAL_PUTCHAR:;
 //             debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
             char output_character = msg.words [1];
@@ -340,7 +354,7 @@ static void recv_handler (void *arg)
             break;
 
         case AOS_ROUTE_FIND_SERVICE:;
-            debug_printf ("Got AOS_ROUTE_FIND_SERVICE\n");
+            debug_printf ("Got AOS_ROUTE_FIND_SERVICE 0x%x\n", msg.words [1]);
             // generate new ID
             uint32_t id = find_request_index;
             find_request_index++;
@@ -354,7 +368,7 @@ static void recv_handler (void *arg)
                 lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
             } else {
                 // Service is unknown. Send error back.
-                lmp_chan_send1 (lc, 0, NULL_CAP, -1);  
+                lmp_chan_send1 (lc, 0, NULL_CAP, -1); // TODO: proper error value
             }
             break;
         case AOS_ROUTE_REQUEST_EP:;
@@ -448,6 +462,9 @@ static void recv_handler (void *arg)
             error = cap_delete (ddb [pid_to_kill].dispatcher_frame);
             ddb [pid_to_kill].name[0] = '\0';
             // TODO: properly clean up processor, i.e. its full cspace.
+            break;
+        case AOS_RPC_SET_FOREGROUND:;
+            debug_printf ("TODO\n");
             break;
         default:
             // YK: Uncomment this if you really need it.
@@ -553,6 +570,9 @@ int main(int argc, char *argv[])
         abort();
     }
 
+    // Set up some data structures for RPC services.
+    init_data_structures ();
+
     // Create our endpoint to self
     err = cap_retype(cap_selfep, cap_dispatcher, ObjType_EndPoint, 0);
     if (err_is_fail(err)) {
@@ -572,22 +592,26 @@ int main(int argc, char *argv[])
     led_set_state (true);
 
     // Initialize the serial driver.
+    struct lmp_chan serial_chan;
     if (err_is_ok (err)) {
-        init_uart_driver ();
+//         init_uart_driver ();
+        strcpy(ddb[2].name, "serial_driver");
+        err = spawn_with_channel ("serial_driver", 2, &(ddb[2].dispatcher_frame), &serial_chan);
+        debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
+        while (services [aos_service_serial] == NULL) {
+            event_dispatch (get_default_waitset());
+        }
     }
+
 
     if (err_is_fail (err)) {
         debug_printf ("Failed to initialize: %s\n", err_getstring (err));
     }
     debug_printf("initialized dev memory management\n");
 
-
-    // Set up some data structures for RPC services.
-    init_data_structures ();
-
     struct lmp_chan memeater_chan;
     strcpy(ddb[1].name, "memeater");
-    spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame),&memeater_chan);
+    spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
 
     // Go into messaging main loop.
     while (true) {

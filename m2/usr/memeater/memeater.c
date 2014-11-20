@@ -188,6 +188,11 @@ int main(int argc, char *argv[])
     test_channel   = aos_rpc_get_init_channel ();
     led_channel = aos_rpc_get_init_channel ();
 
+    struct capref serial_ep;
+    aos_find_service (aos_service_serial, &serial_ep);
+    serial_channel = malloc (sizeof (struct aos_rpc));
+    aos_rpc_init (serial_channel, serial_ep);
+
 
     errval_t error = SYS_ERR_OK;
 
