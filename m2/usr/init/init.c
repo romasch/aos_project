@@ -37,8 +37,9 @@
 // Entry of the process database maintained by init.
 struct ddb_entry
 {
-           char     name[MAX_PROCESS_NAME_LENGTH + 1];
-    struct lmp_chan channel                          ;
+    char name[MAX_PROCESS_NAME_LENGTH + 1];
+    struct capref dispatcher_frame;
+    struct lmp_chan channel;
 };
 
 static struct ddb_entry ddb[32];
@@ -68,7 +69,9 @@ static void init_data_structures (void)
 {
     for (int i=0; i<COUNT_OF(ddb); i++) {
         ddb[i].name[0] = '\0';
-    }    
+    }
+    ddb[0].name[0] = 'i'; // TODO: write init...
+    ddb[0].name[1] = '\0';
 
     for (int i=0; i<aos_service_guard; i++) {
         services [i] = NULL;
@@ -89,7 +92,7 @@ static void recv_handler (void *arg);
  *
  * \arg ret_channel: Structure to be filled in with new channel.
  */
-static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_channel)
+static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struct capref* ret_dispatcher, struct lmp_chan* ret_channel)
 {
     debug_printf("Spawning new domain: %s...\n", domain_name);
     errval_t error = SYS_ERR_OK;
@@ -106,7 +109,16 @@ static errval_t spawn_with_channel (char* domain_name, struct lmp_chan* ret_chan
     //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
     // Try to find a better suited function
     error = spawn_load_with_bootinfo (&new_domain, bi, prefixed_name, my_core_id);
+    debug_printf ("error: %s\n", err_getstring (error));
 
+    // Set data structures.
+    new_domain.domain_id = domain_id;
+    get_dispatcher_generic (new_domain.handle)->domain_id = domain_id;
+    if (ret_dispatcher) {
+        // TODO; error handling. Also, it may be possible to not delete new_domain.dcb
+        slot_alloc (ret_dispatcher);
+        cap_copy (*ret_dispatcher, new_domain.dcb);
+    }
 
     // Initialize memeater.
     // NOTE: In upstream barrelfish, this function copies around some more capabilities.
@@ -318,14 +330,14 @@ static void recv_handler (void *arg)
             }
             
             if (idx != -1) {
-                status = spawn_with_channel(name, &ddb[idx].channel);
+                status = spawn_with_channel(name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
                 if (!err_is_fail(err)) {
                     strcpy(ddb[idx].name, name);
                 }
             }    
             
             // Send reply back to the client
-            lmp_chan_send2(lc, 0, NULL_CAP, status, idx);            
+            lmp_chan_send2(lc, 0, NULL_CAP, status, idx);
             break;
         case AOS_RPC_GET_PROCESS_NAME:;
             domainid_t pid    = msg.words [1];
@@ -365,6 +377,18 @@ static void recv_handler (void *arg)
             bool state = msg.words [1];
             led_set_state (state);
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
+            break;
+        case AOS_RPC_KILL:;
+            debug_printf ("Got AOS_RPC_KILL\n");
+            // TODO: error handling;
+            uint32_t pid_to_kill = msg.words [1];
+            // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
+            lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
+            error = cap_revoke (ddb [pid_to_kill].dispatcher_frame);
+            error = cap_delete (ddb [pid_to_kill].dispatcher_frame);
+            ddb [pid_to_kill].name[0] = '\0';
+            // TODO: properly clean up processor, i.e. its full cspace.
+            break;
         default:
             // YK: Uncomment this if you really need it.
             //debug_printf ("Got default value\n");
@@ -502,7 +526,8 @@ int main(int argc, char *argv[])
     init_data_structures ();
 
     struct lmp_chan memeater_chan;
-    spawn_with_channel ("memeater", &memeater_chan);
+    strcpy(ddb[1].name, "memeater");
+    spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame),&memeater_chan);
 
     // Go into messaging main loop.
     while (true) {

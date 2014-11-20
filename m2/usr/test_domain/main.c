@@ -4,6 +4,7 @@
 
 #include <barrelfish/aos_rpc.h>
 
+__attribute__((unused))
 static void handler (void *arg)
 {
     debug_printf ("LMP message in test_domain...\n");
@@ -79,6 +80,7 @@ int main (int argc, char *argv[])
     lmp_chan_register_recv (init_channel, get_default_waitset (), MKCLOSURE (handler, init_channel));// TODO: error handling
 
     while (true) {
-       error = event_dispatch (get_default_waitset());
+        error = event_dispatch (get_default_waitset());
     }
+    debug_printf ("test_domain returned\n", error);
 }

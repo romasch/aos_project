@@ -169,6 +169,10 @@ static void start_shell (void)
             aos_rpc_set_led (led_channel, false);
         } else if (starts_with ("ps"         , buf) != false) {
             print_process_list();
+        } else if (starts_with ("kill", buf)) {
+            aos_rpc_kill (pm_channel, 2);
+        } else if (starts_with ("ping", buf)) {
+            test_routing_to_domain();
         } else {
             execute_external_command(&buf[0]);
         }
@@ -291,7 +295,7 @@ static void test_routing_to_domain (void)
 {   
     // Test routing
     //for (bool success = false; success == false;) {
-    for (int = 0; i < 100; i++) {
+    for (int i = 0; i < 100; i++) {
         errval_t error;
         struct capref test_domain;
         error = aos_find_service (aos_service_test, &test_domain);
@@ -301,8 +305,7 @@ static void test_routing_to_domain (void)
             error = aos_rpc_init (&test_domain_chan, test_domain);
 
             error = aos_ping (&test_domain_chan, 42);
-
-            success = true;
+            i = 100; // exit
         } else {
             // Try again in hope of quick test_domain registration in the system
         }

@@ -148,7 +148,7 @@ enum aos_service {
  *
  * Type: Synchronous
  * Target: Serial driver
- * Send Args: -
+ * Send Args: Domain ID of current domain
  * Send Capability: -
  * Receive Args: error value, input character
  * Receive Capability: -
@@ -215,6 +215,32 @@ enum aos_service {
  */
 #define AOS_RPC_SET_LED 13
 
+/**
+ * Kill the indicated domain.
+ * NOTE: By using its own domain id, this function can
+ * also be used to exit a domain.
+ *
+ * Type: Synchronous
+ * Target: Process manager (init)
+ * Send Args: ID of the current domain.
+ * Send Capability: -
+ * Receive Args: error value (although may never receive this if killing itself)
+ * Receive Capability: -
+ */
+#define AOS_RPC_KILL 14
+
+/**
+ * Set the foreground task in serial driver.
+ * Only this domain can receive input.
+ *
+ * Type: Synchronous
+ * Target: Serial driver
+ * Send Args: Domain ID of the selected task.
+ * Send Capability: -
+ * Receive Args: error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_SET_FOREGROUND 15
 
 struct aos_rpc {
     struct lmp_chan channel;
@@ -388,6 +414,22 @@ errval_t aos_register_service (struct aos_rpc* rpc, uint32_t service);
  * \brief Turn the LED on or off.
  */
 errval_t aos_rpc_set_led (struct aos_rpc* rpc, bool new_state);
+
+/**
+ * \brief Set domain as the foreground task.
+ */
+errval_t aos_rpc_set_foreground (struct aos_rpc* rpc, domainid_t domain);
+
+/**
+ * \brief Kill another domain.
+ */
+errval_t aos_rpc_kill (struct aos_rpc*, domainid_t domain);
+
+/**
+ * \brief Exit the current domain.
+ * Internally uses kill.
+ */
+void aos_rpc_exit (struct aos_rpc* rpc);
 
 /**
  * Ping a domain.

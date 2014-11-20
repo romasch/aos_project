@@ -257,6 +257,7 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *chan, char *retc)
 
     // Set up the send arguments.
     args.message.words [0] = AOS_RPC_SERIAL_GETCHAR;
+    args.message.words [1] = disp_get_domain_id();
 
     // Do the IPC call.
     error = aos_send_receive (&args, false);
@@ -569,6 +570,74 @@ errval_t aos_rpc_set_led (struct aos_rpc* rpc, bool new_state)
     return error;
 }
 
+/**
+ * Set the specified domain as the foreground task, such that it is able
+ * to receive input.
+ */
+errval_t aos_rpc_set_foreground (struct aos_rpc* rpc, domainid_t domain)
+{
+    debug_printf_quiet ("aos_rpc_set_foreground...\n");
+
+    struct lmp_chan* channel = &rpc->channel;
+    // Provide a set of message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the arguments according to the convention.
+    args.cap = channel -> local_cap;
+    args.message.words [0] = AOS_RPC_SET_FOREGROUND;
+    args.message.words [1] = domain;
+
+    // Do the actual IPC call.
+    errval_t error = aos_send_receive (&args, false);
+
+    // Check if there's an error.
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+    }
+    print_error (error, "aos_rpc_set_foreground: %s\n", err_getstring (error));
+    return error;
+}
+
+/**
+ * Kill the domain with the specified domain ID.
+ */
+errval_t aos_rpc_kill (struct aos_rpc* rpc, domainid_t domain)
+{
+    debug_printf_quiet ("aos_rpc_kill...\n");
+
+    struct lmp_chan* channel = &rpc->channel;
+    // Provide a set of message arguments.
+    struct lmp_message_args args;
+    init_lmp_message_args (&args, channel);
+
+    // Set up the arguments according to the convention.
+    args.cap = channel -> local_cap;
+    args.message.words [0] = AOS_RPC_KILL;
+    args.message.words [1] = domain;
+
+    // Do the actual IPC call.
+    errval_t error = aos_send_receive (&args, false);
+
+    // Check if there's an error.
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+    }
+    print_error (error, "aos_rpc_kill: %s\n", err_getstring (error));
+    return error;
+}
+
+/**
+ * Send an exit request.
+ * Current domain should be made unrunnable immediately.
+ */
+void aos_rpc_exit (struct aos_rpc* rpc)
+{
+    // TODO: maybe adapt to a more general aos_rpc_kill.
+    struct lmp_chan* channel = &rpc->channel;
+    // LMP_SEND_FLAGS_DEFAULT ~~ give up processor.
+    lmp_chan_send2 (channel, LMP_SEND_FLAGS_DEFAULT, NULL_CAP, AOS_RPC_KILL, disp_get_domain_id());
+}
 
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 {

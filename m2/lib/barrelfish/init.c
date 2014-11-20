@@ -57,7 +57,8 @@ void libc_exit(int status)
 
         // XXX: Leak all other domain allocations
     } else {
-        debug_printf("libc_exit NYI!\n");
+        aos_rpc_exit (aos_rpc_get_init_channel());
+        debug_printf("Error: aos_rpc_exit returned\n");
     }
 
     // If we're not dead by now, we wait

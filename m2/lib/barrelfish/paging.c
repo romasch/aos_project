@@ -25,7 +25,7 @@
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
 
 // Default page count for refill requests by slab data structures.
-#define SLAB_REFILL_PAGE_COUNT 16u
+#define SLAB_REFILL_PAGE_COUNT 32u
 
 // Predefined paging region for slot allocator.
 // This is defined by us as a workaround to a bug.
