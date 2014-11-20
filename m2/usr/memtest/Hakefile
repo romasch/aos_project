@@ -1,0 +1,12 @@
+--------------------------------------------------------------------------
+--
+-- Hakefile for /usr/memtest
+--
+--------------------------------------------------------------------------
+
+[ build application { target = "memtest",
+  		      cFiles = [ "main.c" ],
+                      flounderDefs = [ "mem" ],
+                      architectures = allArchitectures
+                    }
+]
