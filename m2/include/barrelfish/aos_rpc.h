@@ -23,6 +23,8 @@ enum aos_service {
     aos_service_ram = 0,
     aos_service_serial,
     aos_service_led,
+	aos_service_init,
+	aos_service_domain,
     //...
 
     aos_service_test,
