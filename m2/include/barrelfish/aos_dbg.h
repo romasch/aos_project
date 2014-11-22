@@ -7,7 +7,7 @@
         #define AOS_DEBUG 0
     #endif
     
-    #if AOS_DEBUG == 1 && !defined(VERBOSE)
+    #if AOS_DEBUG == 1 || defined(VERBOSE)
         #define debug_printf_quiet debug_printf
     #else
         #define debug_printf_quiet(x, ...)

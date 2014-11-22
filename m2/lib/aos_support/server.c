@@ -58,6 +58,7 @@ static errval_t create_channel (struct lmp_chan** ret_channel)
  */
 static void default_handler (void* arg)
 {
+    debug_printf_quiet ("Handling LMP message...\n");
     errval_t error = SYS_ERR_OK;
     struct lmp_chan* channel = (struct lmp_chan*) arg;
     struct lmp_recv_msg message = LMP_RECV_MSG_INIT;
