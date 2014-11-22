@@ -91,13 +91,12 @@ static void execute_external_command(char* const cmd)
     }
     
     err = aos_rpc_process_spawn(pm_channel, cmd, &pid);
-    if (err_is_fail (err) == false) {
-        success = true;
-    }
+    success = err_is_ok (err);
 
     if (!background && success) { // not background
         aos_rpc_set_foreground (serial_channel, pid);
         aos_rpc_wait_for_termination (pm_channel, pid);
+        debug_printf ("got released...\n");
         aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
     }
 
@@ -121,6 +120,7 @@ static void start_shell (void)
         bool finished = false;
         int  i        = 0    ;
         aos_rpc_serial_putchar (serial_channel, '$');
+        memset (&buf, 0, 256);
 
         // Collect input characters in the string buffer until the moment
         // when we will have 'carriage return' character.

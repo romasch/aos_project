@@ -36,17 +36,19 @@
 #define BINARY_PREFIX "armv7/sbin/"
 
 #define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
+#define DDB_FIXED_LENGTH 32
 
 // Entry of the process database maintained by init.
 struct ddb_entry
 {
     char name[MAX_PROCESS_NAME_LENGTH + 1];
     struct capref dispatcher_frame;
+    bool exists;
     struct lmp_chan channel;
     struct lmp_chan* termination_observer;
 };
 
-static struct ddb_entry ddb[32];
+static struct ddb_entry ddb[DDB_FIXED_LENGTH];
 
 struct bootinfo *bi;
 static coreid_t my_core_id;
@@ -352,20 +354,20 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_alloc_recv_slot (lc);
             break;
         case AOS_RPC_SPAWN_PROCESS:;
-            int       idx    = -1                   ;
-            char    * name   = (char*)&msg.words [1];
+            int idx = -1;
+            char* name = (char*) &(msg.words [1]);
 
             //DBG: debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
 
             // Lookup of free process slot in process database
-            for (int i = 0; (i < COUNT_OF(ddb)) && (idx == -1); i++) {
+            for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
                 if (ddb[i].name[0] == '\0') {
                     idx = i;
                 }
             }
 
             if (idx != -1) {
-                err = spawn_with_channel(name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
+                err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
                 if (err_is_ok(err)) {
                     strcpy(ddb[idx].name, name);
                 }
@@ -376,34 +378,33 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             break;
         case AOS_RPC_GET_PROCESS_NAME:;
             domainid_t pid    = msg.words [1];
+            debug_printf_quiet ("Got AOS_RPC_GET_PROCESS_NAME  for process %u\n", pid);
 
-            //DBG: debug_printf ("Got AOS_RPC_GET_PROCESS_NAME <== 0x%x\n", pid);
-
-            if ((pid < COUNT_OF(ddb)) && (ddb[pid].name[0] != '\0')) {
+            if ((pid < DDB_FIXED_LENGTH) && (ddb[pid].name[0] != '\0')) {
                 uint32_t args[8];
 
                 strcpy((char*)args, ddb[pid].name);
 
-                lmp_chan_send9 (lc, 0, NULL_CAP, 0, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+                lmp_chan_send9 (lc, 0, NULL_CAP, SYS_ERR_OK, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
             } else {
                 lmp_chan_send1 (lc, 0, NULL_CAP, -1);
             }
             break;
         case AOS_RPC_GET_PROCESS_LIST:;
-            //DBG: debug_printf ("Got AOS_RPC_GET_PROCESS_LIST\n");
+            debug_printf_quiet ("Got AOS_RPC_GET_PROCESS_LIST\n");
             uint32_t args[7] = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
-            int      didx    =  0                                                                                  ;
+            int args_index = 0;
 
             idx = 0xffffffff;
 
-            for (int i = msg.words [1]; (i < COUNT_OF(ddb)) && (didx < COUNT_OF(args)); i++) {
+            for (int i = msg.words [1]; (i < DDB_FIXED_LENGTH) && (args_index < 7); i++) {
                 if (ddb[i].name[0] != '\0') {
-                    args[didx] = i;
-                    didx++;
+                    args[args_index] = i;
+                    args_index++;
                     idx  = i + 1;
                 }
             }
-            lmp_chan_send9 (lc, 0, NULL_CAP, 0, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+            lmp_chan_send9 (lc, 0, NULL_CAP, SYS_ERR_OK, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             break;
         case AOS_RPC_SET_LED:;
             bool state = msg.words [1];
@@ -416,13 +417,14 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             uint32_t pid_to_kill = msg.words [1];
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
-            error = cap_revoke (ddb [pid_to_kill].dispatcher_frame);
-            error = cap_delete (ddb [pid_to_kill].dispatcher_frame);
             ddb [pid_to_kill].name[0] = '\0';
+            error = cap_revoke (ddb [pid_to_kill].dispatcher_frame);
+            error = cap_destroy (ddb [pid_to_kill].dispatcher_frame);
 
             // Notify the observer about termination.
             if (ddb [pid_to_kill].termination_observer) {
                 lmp_chan_send1 (ddb [pid_to_kill].termination_observer, 0, NULL_CAP, SYS_ERR_OK);
+                ddb [pid_to_kill].termination_observer = NULL;
             }
 
             // TODO: properly clean up processor, i.e. its full cspace.
@@ -439,6 +441,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             break;
         default:
             handle_unknown_message (channel, cap);
+            debug_printf ("ERROR: Got unknown message\n");
     }
 
 }

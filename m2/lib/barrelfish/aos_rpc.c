@@ -405,20 +405,19 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
     errval_t error = 0;
     
     if ((chan != NULL) && (pids != NULL) && (pid_count != NULL)) {
-        struct lmp_message_args  args   ;
-        struct lmp_chan        * channel = &chan->channel;
+        struct lmp_message_args args;
+        struct lmp_chan* channel = &chan->channel;
 
         int idx = 0;
-    
-        init_lmp_message_args (&args, channel);
-
-        *pids      = NULL;
-        *pid_count = 0   ; 
+        *pids = NULL;
+        *pid_count = 0;
         for (; (idx != 0xffffffff) && err_is_ok (error);) {
+
+            init_lmp_message_args (&args, channel);
             args.message.words [0] = AOS_RPC_GET_PROCESS_LIST;
             args.message.words [1] = idx                     ;
             // Do the IPC call.
-            error = aos_send_receive(&args, true);
+            error = aos_send_receive(&args, false);
             print_error (error, "aos_rpc_process_get_all_pids: communication failed. %s\n", err_getstring (error));
           
             if (err_is_ok (args.message.words[0])) {
