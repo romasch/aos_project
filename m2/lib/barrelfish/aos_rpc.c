@@ -17,7 +17,7 @@
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan.h>
 
-#include <aos_dbg.h>
+#include <barrelfish/aos_dbg.h>
 
 static inline void print_error (errval_t error, char* fmt, ...)
 {

@@ -3,6 +3,8 @@
  */
 
 #include <barrelfish/aos_rpc.h>
+#include <aos_support/server.h>
+
 
 // From Milestone 0...
 #define UART_BASE 0x48020000
@@ -131,6 +133,8 @@ static void handler (void *arg)
 int main (int argc, char *argv[])
 {
     debug_printf ("serial_driver: started as %s\n", argv[0]);
+
+    hello_world ();
 
     struct aos_rpc* rpc = aos_rpc_get_init_channel ();
     struct lmp_chan* init_channel = &(rpc->channel);

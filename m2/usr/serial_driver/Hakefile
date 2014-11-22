@@ -4,10 +4,9 @@
 --
 --------------------------------------------------------------------------
 
-[ build application { target = "serial_driver",
-              cFiles = [ "main.c" ],
-                      flounderDefs = [ "mem" ],
-                      architectures = allArchitectures
-                    }
+[ build application {
+        target = "serial_driver",
+        cFiles = [ "main.c" ],
+        addLibraries = [ "aos_support" ]
+    }
 ]
-

@@ -4,10 +4,8 @@
 --
 --------------------------------------------------------------------------
 
-[ build application { target = "hello_world",
-              cFiles = [ "main.c" ],
-                      flounderDefs = [ "mem" ],
-                      architectures = allArchitectures
-                    }
+[ build application {
+        target = "hello_world",
+        cFiles = [ "main.c" ]
+    }
 ]
-

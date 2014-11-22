@@ -4,10 +4,9 @@
 --
 --------------------------------------------------------------------------
 
-[ build application { target = "test_domain",
-              cFiles = [ "main.c" ],
-                      flounderDefs = [ "mem" ],
-                      architectures = allArchitectures
-                    }
+[ build application {
+        target = "test_domain",
+        cFiles = [ "main.c" ],
+        addLibraries = [ "aos_support" ]
+    }
 ]
-

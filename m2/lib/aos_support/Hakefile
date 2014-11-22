@@ -1,0 +1,11 @@
+--------------------------------------------------------------------------
+--
+-- Hakefile for lib/aos_support
+--
+-- This library contains several support functions
+-- for the Advanced Operating Systems course.
+-- 
+--------------------------------------------------------------------------
+
+[ build library { target = "aos_support", cFiles = [ "server.c" ] } ]
+

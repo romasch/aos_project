@@ -4,9 +4,8 @@
 --
 --------------------------------------------------------------------------
 
-[ build application { target = "memtest",
-  		      cFiles = [ "main.c" ],
-                      flounderDefs = [ "mem" ],
-                      architectures = allArchitectures
-                    }
+[ build application {
+        target = "memtest",
+        cFiles = [ "main.c" ]
+    }
 ]

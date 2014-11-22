@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include<aos_dbg.h>
+#include <barrelfish/aos_dbg.h>
 
 // Flags for newly mapped pages.
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
