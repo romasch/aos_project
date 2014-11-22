@@ -13,7 +13,7 @@
         #define debug_printf_quiet(x, ...)
     #endif
 
-    #if AOS_DEBUG == 1 && defined(DEBUG_PRINT_SHORT)
+    #if AOS_DEBUG == 1 || defined(DEBUG_PRINT_SHORT)
         static inline void debug_print_short (char* msg)    
         {
             char buf [5] = {0,0,0,0,0};
@@ -26,7 +26,7 @@
         static inline void debug_print_short (char* msg) {}
     #endif
 
-    #if AOS_DEBUG == 1 && defined(PRINT_STACK)
+    #if AOS_DEBUG == 1 || defined(PRINT_STACK)
         #define PRINT_ENTRY debug_printf("%s...\n", __func__)
         #define PRINT_EXIT(error) debug_printf ("%s: %s\n", __func__, err_getstring (error))
         #define PRINT_EXIT_VOID debug_printf ("%s terminated\n", __func__)

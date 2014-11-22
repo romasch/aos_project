@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 
+// #define AOS_DEBUG 1
+
 #include <barrelfish/aos_dbg.h>
 
 // Flags for newly mapped pages.
@@ -308,6 +310,10 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
     uint32_t remaining_pages = page_count;
     lvaddr_t mapped_addr = base_addr;
 
+    // Offset at which a frame should be mapped. Usually zero, but
+    // when multiple page tables are needed it may be different.
+    uint32_t frame_offset = (page_count - remaining_pages) * PAGE_SIZE;
+
     while (remaining_pages > 0 && err_is_ok (error)) {
 
         // Now map all pages to the correct second-level page table.
@@ -336,7 +342,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
                 error = cap_copy (copied_frame, new_frame);
 
                 if (err_is_ok (error)) {
-                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, 0, free_slots);
+                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, frame_offset, free_slots);
                     remaining_pages -= free_slots;
                     mapped_addr += free_slots * PAGE_SIZE;
                 } else {
@@ -345,7 +351,7 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
             } else {
                 // Everything fits into the current page table.
                 // Map it to the specified addresses.
-                error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, 0, remaining_pages);
+                error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, frame_offset, remaining_pages);
                 remaining_pages = 0;
             }
         }
@@ -647,6 +653,10 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
             error = paging_allocate_ptable (state, l1_index);
         }
 
+        // Offset at which a frame should be mapped. Usually zero, but
+        // when multiple page tables are needed it may be different.
+        uint32_t frame_offset = (page_count - remaining_pages) * PAGE_SIZE;
+
         if (err_is_ok (error)) {
 
             // Get the capability for the second-level page table.
@@ -664,7 +674,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
                 error = cap_copy (copied_frame, frame);
 
                 if (err_is_ok (error)) {
-                    error = vnode_map (cap_l2, copied_frame, l2_index, flags, 0, free_slots);
+                    error = vnode_map (cap_l2, copied_frame, l2_index, flags, frame_offset, free_slots);
                     remaining_pages -= free_slots;
                     mapped_addr += free_slots * PAGE_SIZE;
                 } else {
@@ -673,7 +683,7 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
             } else {
                 // Everything fits into the current page table.
                 // Map it to the specified addresses.
-                error = vnode_map (cap_l2, frame, l2_index, flags, 0, remaining_pages);
+                error = vnode_map (cap_l2, frame, l2_index, flags, frame_offset, remaining_pages);
                 remaining_pages = 0;
             }
         }
