@@ -17,15 +17,7 @@
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan.h>
 
-#include <stdarg.h>
-
-#define QUIET // Suppress some output.
-
-#ifdef QUIET
-    #define debug_printf_quiet(x, ...)
-#else
-    #define debug_printf_quiet debug_printf
-#endif
+#include <aos_dbg.h>
 
 static inline void print_error (errval_t error, char* fmt, ...)
 {
@@ -707,7 +699,7 @@ errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 
     struct lmp_chan* channel = &rpc->channel;
     lmp_chan_init (channel);
-    debug_printf ("Initializing channel %p\n", channel);
+    //DBG: Uncomment if you really need it ==> debug_printf ("Initializing channel %p\n", channel);
 
     // Provide a new set of message arguments.
     struct lmp_message_args args;

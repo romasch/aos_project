@@ -127,7 +127,7 @@ static errval_t ram_alloc_ipc (struct capref *ret, uint8_t size_bits, uint64_t m
 {
     size_t ret_bits; // TODO: handle this...
     errval_t error = aos_rpc_get_ram_cap (ram_server_connection, size_bits, ret, &ret_bits);
-    debug_printf ("Allocating %u bits: %s\n", size_bits, err_getstring (error));
+    // DBG: Uncomment if you really need it ==> debug_printf ("Allocating %u bits: %s\n", size_bits, err_getstring (error));
     return error;
 }
 
@@ -181,7 +181,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }
 
     // STEP 3: register ourselves with init
-    debug_printf ("Initializing LMP system...\n");
+    //DBG: Uncomment if you really need it ==> debug_printf ("Initializing LMP system...\n");
 
     // The following function does all of these steps:
     // Create local endpoint

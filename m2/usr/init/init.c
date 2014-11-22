@@ -106,7 +106,7 @@ static void recv_handler (void *arg);
  */
 static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struct capref* ret_dispatcher, struct lmp_chan* ret_channel)
 {
-    debug_printf("Spawning new domain: %s...\n", domain_name);
+    //DBG: Uncomment if you really need it ==> debug_printf("Spawning new domain: %s...\n", domain_name);
     errval_t error = SYS_ERR_OK;
 
     // Struct to keep track of new domains cspace, vspace, etc...
@@ -279,7 +279,7 @@ static void recv_handler (void *arg)
             // Delete capability and reuse slot.
             err = cap_delete (cap);
             lmp_chan_set_recv_slot (lc, cap);
-            debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
+            //DBG: Uncomment if you really need it ==> debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
             break;
         case AOS_RPC_GET_RAM_CAP:;
             size_t bits = msg.words [1];
@@ -291,7 +291,7 @@ static void recv_handler (void *arg)
             //TODO: do we need to destroy ram capability here?
 //          error = cap_destroy (ram);
 
-            debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
+            //DBG: Uncomment if you really need it ==> debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
             break;
 
         case AOS_RPC_SEND_STRING:;
@@ -348,7 +348,7 @@ static void recv_handler (void *arg)
             lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
             break;
         case AOS_RPC_CONNECTION_INIT:;
-            debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
+            //DBG: Uncomment if you really need it ==> debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
             lc->remote_cap = cap;
             err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
             err = lmp_chan_send1 (lc, 0, NULL_CAP, err);
@@ -454,7 +454,7 @@ static void recv_handler (void *arg)
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
             break;
         case AOS_RPC_KILL:;
-            debug_printf ("Got AOS_RPC_KILL\n");
+            //DBG: Uncomment if you really need it ==> debug_printf ("Got AOS_RPC_KILL\n");
             // TODO: error handling;
             uint32_t pid_to_kill = msg.words [1];
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.

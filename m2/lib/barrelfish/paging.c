@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include<aos_dbg.h>
+
 // Flags for newly mapped pages.
 #define FLAGS (KPI_PAGING_FLAGS_READ | KPI_PAGING_FLAGS_WRITE)
 
@@ -31,41 +33,6 @@
 // This is defined by us as a workaround to a bug.
 // TODO Which size?? Experiments show that it needs about 32 pages for an 48MB array.
 #define SLOT_REGION_SIZE FRAME_SIZE
-
-
-// Enable or disable debugging output:
-// #define PRINT_STACK
-// #define VERBOSE
-// #define DEBUG_PRINT_SHORT
-
-#ifdef DEBUG_PRINT_SHORT
-static inline void debug_print_short (char* msg)
-{
-    char buf [5] = {0,0,0,0,0};
-    for (int i=0; i<5 || msg[i] == '\0'; i++) {
-        buf [i] = msg [i];
-    }
-    sys_print (buf, 5);
-}
-#else
-static inline void debug_print_short (char* msg) {}
-#endif
-
-#ifdef PRINT_STACK
-    #define PRINT_ENTRY debug_printf("%s...\n", __func__)
-    #define PRINT_EXIT(error) debug_printf ("%s: %s\n", __func__, err_getstring (error))
-    #define PRINT_EXIT_VOID debug_printf ("%s terminated\n", __func__)
-#else
-    #define PRINT_ENTRY
-    #define PRINT_EXIT(error)
-    #define PRINT_EXIT_VOID
-#endif
-
-#ifndef VERBOSE
-    #define debug_printf_quiet(x, ...)
-#else
-    #define debug_printf_quiet debug_printf
-#endif
 
 // A global paging state instance.
 static struct paging_state current;

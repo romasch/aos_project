@@ -1,0 +1,13 @@
+--------------------------------------------------------------------------
+--
+-- Hakefile for serial_driver
+--
+--------------------------------------------------------------------------
+
+[ build application { target = "hello_world",
+              cFiles = [ "main.c" ],
+                      flounderDefs = [ "mem" ],
+                      architectures = allArchitectures
+                    }
+]
+
