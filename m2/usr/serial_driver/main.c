@@ -2,9 +2,9 @@
  *\brief A user-space serial driver.
  */
 
+#include <barrelfish/aos_dbg.h>
 #include <barrelfish/aos_rpc.h>
 #include <aos_support/server.h>
-
 
 // From Milestone 0...
 #define UART_BASE 0x48020000
@@ -51,6 +51,35 @@ static void uart_putchar(char c)
     *uart_thr = c;
 }
 
+__attribute__((unused))
+static void small_handler (struct lmp_chan* channel, struct lmp_recv_msg* message,
+                           struct capref capability, uint32_t message_type)
+{
+    switch (message_type) {
+        case AOS_RPC_SERIAL_PUTCHAR:;
+            char output_character = message -> words [1];
+            uart_putchar (output_character);
+            break;
+        case AOS_RPC_SERIAL_GETCHAR:;
+            if (foreground_domain == 0 || message -> words [1] == foreground_domain) {
+                char input_character = uart_getchar ();
+                lmp_chan_send2 (channel, 0, NULL_CAP, SYS_ERR_OK, input_character);
+            } else {
+                // TODO: let it wait!
+                lmp_chan_send2 (channel, 0, NULL_CAP, -1, 0);
+            }
+            break;
+        case AOS_RPC_SET_FOREGROUND:;
+            foreground_domain = message -> words [1];
+            debug_printf_quiet ("Setting Domain %u as foreground domain\n", foreground_domain);
+            lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
+            break;
+        default:
+            handle_unknown_message (channel, capability);
+    }
+}
+
+__attribute__((unused))
 static void handler (void *arg)
 {
 //     debug_printf ("LMP message in serial driver...\n");
@@ -134,10 +163,7 @@ int main (int argc, char *argv[])
 {
     debug_printf ("serial_driver: started as %s\n", argv[0]);
 
-    hello_world ();
-
     struct aos_rpc* rpc = aos_rpc_get_init_channel ();
-    struct lmp_chan* init_channel = &(rpc->channel);
 
     struct capref frame;
     errval_t error = aos_rpc_get_dev_cap (rpc, UART_BASE, UART_SIZE, &frame, NULL);
@@ -145,12 +171,17 @@ int main (int argc, char *argv[])
 
     init_uart_driver (frame);
 
+    start_server (aos_service_serial, small_handler);
+    /*
     error = aos_register_service (rpc, aos_service_serial);
 
+
+    struct lmp_chan* init_channel = &(rpc->channel);
     error = lmp_chan_register_recv (init_channel, get_default_waitset (), MKCLOSURE (handler, init_channel));// TODO: error handling
 
     while (true) {
         error = event_dispatch (get_default_waitset());
     }
+    //*/
     debug_printf ("serial_driver returned\n", error);
 }
