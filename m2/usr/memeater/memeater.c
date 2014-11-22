@@ -7,13 +7,6 @@
 #include <barrelfish/aos_rpc.h>
 #include <barrelfish/lmp_chan.h>
 
-
-extern size_t (*_libc_terminal_read_func)(char *, size_t);
-extern size_t (*_libc_terminal_write_func)(const char *, size_t);
-
-// #define BUFSIZE (128UL*1024*1024)
-#define BUFSIZE (4UL*1024*1024)
-
 static struct aos_rpc* serial_channel;
 static struct aos_rpc* pm_channel;
 static struct aos_rpc* led_channel;
@@ -23,27 +16,6 @@ static bool starts_with(const char *prefix, const char *str)
     uint32_t lenpre = strlen(prefix);
 
     return (( strlen(str) < lenpre ) ? ( false ) : ( strncmp(prefix, str, lenpre) == 0 ));
-}
-
-static size_t aos_rpc_terminal_write(const char *buf, size_t len)
-{
-    for (int i=0; i<len; i++) {
-        aos_rpc_serial_putchar (serial_channel, buf[i]);
-    }
-    return 0;
-}
-
-static size_t aos_rpc_terminal_read (char *buf, size_t len)
-{
-    // probably scanf always only wants to read one character anyway...
-    int i = 0;
-    char c;
-    do {
-        aos_rpc_serial_getchar (serial_channel, &c);
-        buf [i] = c;
-        i++;
-    } while (c != '\n' && c != '\r' && i+1 < len);
-    return i;
 }
 
 static void test_routing_to_domain (void);
@@ -205,11 +177,8 @@ int main(int argc, char *argv[])
     debug_printf("memeater started\n");
     pm_channel     = aos_rpc_get_init_channel ();
     led_channel = aos_rpc_get_init_channel ();
+    serial_channel = aos_rpc_get_serial_driver_channel ();
 
-    struct capref serial_ep;
-    aos_find_service (aos_service_serial, &serial_ep);
-    serial_channel = malloc (sizeof (struct aos_rpc));
-    aos_rpc_init (serial_channel, serial_ep);
     aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
 
 //     aos_ping (aos_rpc_get_init_channel (), 46);
@@ -219,10 +188,6 @@ int main(int argc, char *argv[])
 //     aos_ping (aos_rpc_get_init_channel (), 45);
 //     test_process_api ();
 //     test_routing_to_domain();
-
-    // TODO: actually we should do this way earlier, in lib/barrelfish/init.c
-    _libc_terminal_read_func = aos_rpc_terminal_read;
-    _libc_terminal_write_func = aos_rpc_terminal_write;
 
     start_shell ();
 

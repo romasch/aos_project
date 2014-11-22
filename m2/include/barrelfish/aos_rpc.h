@@ -274,7 +274,16 @@ struct aos_rpc {
     // TODO: add state for your implementation
 };
 
+/// The global init channel.
+/// This channel is always available, except in init.
+/// NOTE: Initialization happens in libbarrelfish/init.c
 struct aos_rpc* aos_rpc_get_init_channel (void);
+
+/// The channel to the serial driver.
+/// This channel is always available, except in init and serial_driver.
+/// NOTE: Initialization happens in libbarrelfish/init.c
+struct aos_rpc* aos_rpc_get_serial_driver_channel (void);
+
 
 //NOTE: Start of protected API
 

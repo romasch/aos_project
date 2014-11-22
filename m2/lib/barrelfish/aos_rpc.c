@@ -30,7 +30,7 @@ static inline void print_error (errval_t error, char* fmt, ...)
     }
 }
 
-/// The first LMP channel to init which every domain gets.
+/// Predefined channels available in every domain.
 // NOTE: We can't use malloc here, because the initial ram allocator
 // only allows frames of one page size, and our paging code doesn't allow this.
 static struct aos_rpc init_channel;
@@ -38,6 +38,13 @@ static struct aos_rpc init_channel;
 struct aos_rpc* aos_rpc_get_init_channel (void)
 {
     return &init_channel;
+}
+
+static struct aos_rpc serial_driver_channel;
+
+struct aos_rpc* aos_rpc_get_serial_driver_channel (void)
+{
+    return &serial_driver_channel;
 }
 
 /**

@@ -190,7 +190,7 @@ errval_t start_server (enum aos_service service, handler_function_t handler)
     error = aos_register_service (init_rpc, service);
 
     if (err_is_ok (error)) {
-        error = lmp_chan_register_recv (init_channel, get_default_waitset (), MKCLOSURE (default_handler, init_channel));// TODO: error handling
+        error = lmp_chan_register_recv (init_channel, get_default_waitset (), MKCLOSURE (default_handler, init_channel));
     }
 
     while (err_is_ok (error)) {

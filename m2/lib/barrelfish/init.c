@@ -93,6 +93,32 @@ static size_t dummy_terminal_read(char *buf, size_t len)
     return len;
 }
 
+
+/// Write function for the serial driver.
+static size_t aos_rpc_terminal_write(const char *buf, size_t len)
+{
+    for (int i=0; i<len; i++) {
+        aos_rpc_serial_putchar (aos_rpc_get_serial_driver_channel (), buf[i]);
+    }
+    return 0;
+}
+
+/// Read function for the serial driver.
+static size_t aos_rpc_terminal_read (char *buf, size_t len)
+{
+    // probably scanf always only wants to read one character anyway...
+    int i = 0;
+    char c;
+    do {
+        //TODO: error handling.
+        aos_rpc_serial_getchar (aos_rpc_get_serial_driver_channel (), &c);
+        buf [i] = c;
+        i++;
+    } while (c != '\n' && c != '\r' && i+1 < len);
+    return i;
+}
+
+
 /* Set libc function pointers */
 void barrelfish_libc_glue_init(void)
 {
@@ -210,6 +236,33 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
     // Change ram allocation to use the IPC mechanism.
     error = ram_alloc_set (ram_alloc_ipc);
+
+    // Initialize printf and scanf:
+
+    // Return if we're the serial driver.
+    assert ((params != NULL) && (params->argv != NULL));
+    const char* domain_name = params -> argv [0];
+    if (strcmp (domain_name, "serial_driver") == 0) {
+        return SYS_ERR_OK;
+    }
+
+    // Find the serial driver.
+    struct capref serial_ep;
+    error = aos_find_service (aos_service_serial, &serial_ep);
+
+    // Register ourselves with the serial driver.
+    if (err_is_ok (error)) {
+        aos_rpc_init (aos_rpc_get_serial_driver_channel (), serial_ep);
+    }
+
+    // Tell libc to use the IPC mechanism to print characters.
+    if (err_is_ok (error)) {
+        _libc_terminal_read_func = aos_rpc_terminal_read;
+        _libc_terminal_write_func = aos_rpc_terminal_write;
+    } else {
+        debug_printf ("Error: Could not establish connection to serial driver.\n Error code: %s\n Using sys_print system call instead.\n", err_getstring (error));
+    }
+
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
