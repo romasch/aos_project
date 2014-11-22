@@ -5,8 +5,24 @@
 // NOTE: Maybe it might be better to not use a global variable.
 static handler_function_t external_handler;
 
+/**
+ * Set the external handler.
+ */
+void set_external_handler (handler_function_t handler)
+{
+    external_handler = handler;
+}
+
 // Forward declaration of the shared handler function.
 static void default_handler (void* arg);
+
+/**
+ * Get the default handler.
+ */
+dflt_handler_t get_default_handler (void)
+{
+    return default_handler;
+}
 
 /**
  * Creates a new LMP channel that is ready to accept messages.

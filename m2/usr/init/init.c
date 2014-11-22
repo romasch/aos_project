@@ -30,6 +30,9 @@
 
 #include <mm/mm.h>
 
+#include <aos_support/server.h>
+#include <barrelfish/aos_dbg.h>
+
 #define BINARY_PREFIX "armv7/sbin/"
 
 #define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
@@ -247,40 +250,20 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
 }*/
 
 /**
- * A receive handler for init.
+ * The main receive handler for init.
  */
-static void recv_handler (void *arg)
+static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, struct capref cap, uint32_t type)
 {
-//     debug_printf ("Handling LMP message, channel %p...\n", arg);
+    // TODO: search-and-replace these uses.
+    struct lmp_chan* lc = channel;
+    struct lmp_recv_msg msg = *message;
+
     errval_t err = SYS_ERR_OK;
-    struct lmp_chan* lc = (struct lmp_chan*) arg;
-    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
 
-    // Retrieve capability and arguments.
-    err = lmp_chan_recv(lc, &msg, &cap);
-
-    if (err_is_fail(err) && lmp_err_is_transient(err)) {
-        // reregister
-        lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
-    }
-
-    uint32_t type = msg.words [0];
-
-    switch (type)
-    {
         // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
         // otherwise control will be transfered back to sender immediately...
-
-        case AOS_PING:
-            // Send a response to the ping request.
-            lmp_ep_send1 (cap, 0, NULL_CAP, msg.words[1]);
-
-            // Delete capability and reuse slot.
-            err = cap_delete (cap);
-            lmp_chan_set_recv_slot (lc, cap);
-            //DBG: Uncomment if you really need it ==> debug_printf ("Handled AOS_PING: %s\n", err_getstring (err));
-            break;
+    switch (type)
+    {
         case AOS_RPC_GET_RAM_CAP:;
             size_t bits = msg.words [1];
             struct capref ram;
@@ -318,7 +301,7 @@ static void recv_handler (void *arg)
             }
             break;
         case AOS_ROUTE_REGISTER_SERVICE:;
-            debug_printf ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);
+            debug_printf_quiet ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);
             assert (capref_is_null (cap));
             services [msg.words [1]] = lc;
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
@@ -334,28 +317,10 @@ static void recv_handler (void *arg)
             //TODO: do we need to destroy frame capability here?
 //          error = cap_destroy (device_frame);
 
-            debug_printf ("Handled AOS_RPC_GET_DEVICE_FRAME: %s\n", err_getstring (error));
+            debug_printf_quiet ("Handled AOS_RPC_GET_DEVICE_FRAME: %s\n", err_getstring (error));
             break;
-
-        case AOS_RPC_SERIAL_PUTCHAR:;
-//             debug_printf ("Got AOS_RPC_SERIAL_PUTCHAR\n");
-            char output_character = msg.words [1];
-            uart_putchar (output_character);
-            break;
-        case AOS_RPC_SERIAL_GETCHAR:;
-//             debug_printf ("Got AOS_RPC_SERIAL_GETCHAR\n");
-            char input_character = uart_getchar ();
-            lmp_chan_send2 (lc, 0, NULL_CAP, SYS_ERR_OK, input_character);
-            break;
-        case AOS_RPC_CONNECTION_INIT:;
-            //DBG: Uncomment if you really need it ==> debug_printf ("Got AOS_RPC_CONNECTION_INIT\n");
-            lc->remote_cap = cap;
-            err = lmp_chan_alloc_recv_slot (lc); // TODO: better error handling
-            err = lmp_chan_send1 (lc, 0, NULL_CAP, err);
-            break;
-
         case AOS_ROUTE_FIND_SERVICE:;
-            debug_printf ("Got AOS_ROUTE_FIND_SERVICE 0x%x\n", msg.words [1]);
+            debug_printf_quiet ("Got AOS_ROUTE_FIND_SERVICE 0x%x\n", msg.words [1]);
             // generate new ID
             uint32_t id = find_request_index;
             find_request_index++;
@@ -372,15 +337,8 @@ static void recv_handler (void *arg)
                 lmp_chan_send1 (lc, 0, NULL_CAP, -1); // TODO: proper error value
             }
             break;
-        case AOS_ROUTE_REQUEST_EP:;
-            // NOTE: implemented by all servers, and init usually doesn't handle this.
-            debug_printf ("Got AOS_ROUTE_REQUEST_EP\n");
-            // Extract request ID
-            // Create a new endpoint with accept (using NULL_CAP)
-            // Generate answer with AOS_ROUTE_DELIVER_EP, error value and request ID
-            break;
         case AOS_ROUTE_DELIVER_EP:;
-            debug_printf ("Got AOS_ROUTE_DELIVER_EP\n");
+            debug_printf_quiet ("Got AOS_ROUTE_DELIVER_EP\n");
             // get error value and ID from message
             errval_t error_ret = msg.words [1];
             id = msg.words [2];
@@ -405,14 +363,14 @@ static void recv_handler (void *arg)
                     idx = i;
                 }
             }
-            
+
             if (idx != -1) {
                 err = spawn_with_channel(name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
                 if (err_is_ok(err)) {
                     strcpy(ddb[idx].name, name);
                 }
-            }    
-            
+            }
+
             // Send reply back to the client
             lmp_chan_send2(lc, 0, NULL_CAP, err, idx);
             break;
@@ -423,7 +381,7 @@ static void recv_handler (void *arg)
 
             if ((pid < COUNT_OF(ddb)) && (ddb[pid].name[0] != '\0')) {
                 uint32_t args[8];
-                
+
                 strcpy((char*)args, ddb[pid].name);
 
                 lmp_chan_send9 (lc, 0, NULL_CAP, 0, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
@@ -437,7 +395,7 @@ static void recv_handler (void *arg)
             int      didx    =  0                                                                                  ;
 
             idx = 0xffffffff;
-            
+
             for (int i = msg.words [1]; (i < COUNT_OF(ddb)) && (didx < COUNT_OF(args)); i++) {
                 if (ddb[i].name[0] != '\0') {
                     args[didx] = i;
@@ -445,7 +403,6 @@ static void recv_handler (void *arg)
                     idx  = i + 1;
                 }
             }
-
             lmp_chan_send9 (lc, 0, NULL_CAP, 0, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             break;
         case AOS_RPC_SET_LED:;
@@ -470,9 +427,6 @@ static void recv_handler (void *arg)
 
             // TODO: properly clean up processor, i.e. its full cspace.
             break;
-        case AOS_RPC_SET_FOREGROUND:;
-            debug_printf ("TODO\n");
-            break;
 
         case AOS_RPC_WAIT_FOR_TERMINATION:;
             uint32_t pid_to_wait = msg.words [1];
@@ -482,15 +436,19 @@ static void recv_handler (void *arg)
             } else {
                 ddb [pid_to_wait].termination_observer = lc;
             }
+            break;
         default:
-            // YK: Uncomment this if you really need it.
-            //debug_printf ("Got default value\n");
-            if (! capref_is_null (cap)) {
-                cap_delete (cap);
-                lmp_chan_set_recv_slot (lc, cap);
-            }
+            handle_unknown_message (channel, cap);
     }
-    lmp_chan_register_recv (lc, get_default_waitset(), MKCLOSURE(recv_handler, arg));
+
+}
+
+/**
+ * TODO: Find all occurrences of recv_handler and replace them with get_default_handler().
+ */
+static void recv_handler (void *arg)
+{
+    (get_default_handler ())(arg);
 }
 
 /**
@@ -552,6 +510,8 @@ static errval_t initep_setup (void)
 
 int main(int argc, char *argv[])
 {
+    set_external_handler (my_handler);
+
     errval_t err;
 
     /* Set the core id in the disp_priv struct */
@@ -623,7 +583,7 @@ int main(int argc, char *argv[])
     if (err_is_fail (err)) {
         debug_printf ("Failed to initialize: %s\n", err_getstring (err));
     }
-    debug_printf("initialized dev memory management\n");
+    debug_printf_quiet ("initialized core services\n");
 
     struct lmp_chan memeater_chan;
     strcpy(ddb[1].name, "memeater");

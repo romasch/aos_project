@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
 
     errval_t error = SYS_ERR_OK;
 
-    // STEP 1: connect & send msg to init using syscall
+/*    // STEP 1: connect & send msg to init using syscall
     uint32_t flags = LMP_FLAG_SYNC | LMP_FLAG_YIELD;
     //Test sending a basic message.
     error = lmp_ep_send1 (cap_initep, flags, NULL_CAP, 42);
@@ -223,7 +223,7 @@ int main(int argc, char *argv[])
     debug_printf ("Send message: %s\n", err_getstring (error));
     error = lmp_ep_send1 (cap_initep, flags, cap_selfep, 43);
     debug_printf ("Send message: %s\n", err_getstring (error));
-
+*/
     // Test opening another channel.
     // NOTE: A first channel is already created to talk to RAM server.
 

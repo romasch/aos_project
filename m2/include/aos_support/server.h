@@ -34,4 +34,12 @@ void handle_unknown_message (struct lmp_chan* channel, struct capref capability)
  */
 errval_t start_server (enum aos_service service, handler_function_t handler);
 
+/**
+ * NOTE: Extensions for init.
+ */
+
+typedef void (*dflt_handler_t) (void*);
+dflt_handler_t get_default_handler (void);
+void set_external_handler (handler_function_t handler);
+
 #endif
