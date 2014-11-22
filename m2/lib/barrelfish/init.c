@@ -195,7 +195,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }
 
     // At this point we can test our channel with a ping.
-    aos_ping (aos_rpc_get_init_channel(), 42);
+//     aos_ping (aos_rpc_get_init_channel(), 42);
 
     // STEP 5: now we should have a channel with init set up and can
     // use it for the ram allocator
