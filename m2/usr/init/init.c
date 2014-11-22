@@ -35,7 +35,7 @@
 
 #define BINARY_PREFIX "armv7/sbin/"
 
-#define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
+// #define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
 #define DDB_FIXED_LENGTH 32
 
 // Entry of the process database maintained by init.
@@ -43,7 +43,7 @@ struct ddb_entry
 {
     char name[MAX_PROCESS_NAME_LENGTH + 1];
     struct capref dispatcher_frame;
-    bool exists;
+    bool exists; // TODO: Use this instead of the name.
     struct lmp_chan channel;
     struct lmp_chan* termination_observer;
 };
@@ -83,7 +83,7 @@ static int module_map_size = 0;
  */
 static void init_data_structures (void) 
 {
-    for (int i=0; i<COUNT_OF(ddb); i++) {
+    for (int i=0; i<DDB_FIXED_LENGTH; i++) {
         ddb[i].name[0] = '\0';
     }
     ddb[0].name[0] = 'i'; // TODO: write init...

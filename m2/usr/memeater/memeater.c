@@ -96,7 +96,6 @@ static void execute_external_command(char* const cmd)
     if (!background && success) { // not background
         aos_rpc_set_foreground (serial_channel, pid);
         aos_rpc_wait_for_termination (pm_channel, pid);
-        debug_printf ("got released...\n");
         aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
     }
 
