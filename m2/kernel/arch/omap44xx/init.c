@@ -512,11 +512,9 @@ void app_core_init(void *pointer);
 void  __attribute__ ((noinline,noreturn))
 app_core_init(void *pointer)
 {
-
-//    serial_early_init(serial_console_port);
-    printf("in core-1\n");
-    printf("########################################################\n");
-    while(true);
+    printf ("in core-1 (id: %u)\n", hal_get_cpu_id());
+    while(true); // NOTE: Go into endless loop. Later we may call arch_init();
+//     arch_init (pointer);
 }
 
 extern uint8_t core_id;
@@ -531,11 +529,17 @@ void arch_init(void *pointer)
     struct arm_coredata_elf *elf = NULL;
     core_id = hal_get_cpu_id();
 
-    serial_early_init(serial_console_port);
-//    printk(LOG_NOTE, "hello world\n");
-
-    if(hal_cpu_is_bsp())
+    if (hal_cpu_is_bsp())
     {
+        // NOTE: Moved here to avoid double initialization.
+        serial_early_init(serial_console_port);
+
+        // NOTE: We'll temporarily start the second core.
+        // Once we have user-space boot we can remove this.
+        printf ("in core-0 (id: %u)\n", core_id);
+        start_aps_arm_start (1, 0);
+        for (volatile int wait = 0; wait < 10000; wait++); // prevents garbage output due to races
+
         struct multiboot_info *mb = (struct multiboot_info *)pointer;
         elf = (struct arm_coredata_elf *)&mb->syms.elf;
     	memset(glbl_core_data, 0, sizeof(struct arm_core_data));

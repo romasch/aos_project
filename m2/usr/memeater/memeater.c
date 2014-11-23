@@ -116,27 +116,26 @@ static void start_shell (void)
     debug_printf ("Started simple shell...\n");
 
     while (true) {
-        bool finished = false;
-        int  i        = 0    ;
         aos_rpc_serial_putchar (serial_channel, '$');
         memset (&buf, 0, 256);
 
         // Collect input characters in the string buffer until the moment
         // when we will have 'carriage return' character.
         // Then we will consider it as a single statement
-        for (; (finished == false) && (i < 256); i++) {
+        bool finished = false;
+        for (int i = 0; (finished == false) && (i < 256); i++) {
             aos_rpc_serial_getchar(serial_channel, &buf[i]);
-            
+
             if (buf[i] == '\r') {
-                finished = true; 
+                finished = true;
 
                 // We don't want to see 'CRNL' line ending
                 buf[i] = '\n';
 
-                // Reflect character back to the terminal to 
+                // Reflect character back to the terminal to
                 // let the user see what he typing.
                 aos_rpc_serial_putchar(serial_channel, buf[i]);
-            } else {     
+            } else {
                 aos_rpc_serial_putchar(serial_channel, buf[i]);
             }
         }

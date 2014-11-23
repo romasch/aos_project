@@ -24,7 +24,6 @@
 
 #define STARTUP_TIMEOUT         0xffffff
 
-
 /**
  * Send event to other core
  * Note: this is PandaBoard_specific
@@ -47,11 +46,35 @@ void app_core_start(void); // defined in boot.S
  * \param entry     Entry address for new kernel in the destination
  *                  architecture's lvaddr_t
  *
+ * NOTE: If entry is NULL, this function will use app_core_start as a default.
+ *
  * \returns Zero on successful boot, non-zero (error code) on failure
  */
 int start_aps_arm_start(uint8_t core_id, lpaddr_t entry)
 {
     // TODO: you might want to implement this function
-    printk(LOG_NOTE, "NYI!");
-    return SYS_ERR_OK;
+    errval_t error = SYS_ERR_OK;
+
+    if (core_id == 1) {
+        // Set up the first register.
+        // NOTE: Bits [3:2] should not be zero, otherwise the core will ignore the interrupt.
+        // See OMAP TRM Page 1144
+        volatile uint32_t* app_core_data_register = (volatile uint32_t*) AUX_CORE_BOOT_0;
+        *app_core_data_register = (4 | 8);
+
+        // Set up the entry address.
+        volatile uint32_t* app_core_entry_register = (volatile uint32_t*) AUX_CORE_BOOT_1;
+        if (entry == 0) {
+            *app_core_entry_register = (volatile uint32_t) &app_core_start;
+        } else {
+            *app_core_entry_register = entry;
+        }
+
+        // Send the interrrupt.
+        send_event ();
+
+    } else {
+        error = SYS_ERR_CORE_NOT_FOUND;
+    }
+    return error;
 }
