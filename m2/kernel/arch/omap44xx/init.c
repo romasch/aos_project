@@ -529,8 +529,7 @@ void arch_init(void *pointer)
     struct arm_coredata_elf *elf = NULL;
     core_id = hal_get_cpu_id();
 
-    if (hal_cpu_is_bsp())
-    {
+    if (hal_cpu_is_bsp()) {
         // NOTE: Moved here to avoid double initialization.
         serial_early_init(serial_console_port);
 
@@ -543,7 +542,7 @@ void arch_init(void *pointer)
         struct multiboot_info *mb = (struct multiboot_info *)pointer;
         elf = (struct arm_coredata_elf *)&mb->syms.elf;
     	memset(glbl_core_data, 0, sizeof(struct arm_core_data));
-       glbl_core_data->start_free_ram = ROUND_UP(max(multiboot_end_addr(mb),
+        glbl_core_data->start_free_ram = ROUND_UP(max(multiboot_end_addr(mb),
                     (uintptr_t)&kernel_final_byte), BASE_PAGE_SIZE);
 
         glbl_core_data->mods_addr = mb->mods_addr;
@@ -554,8 +553,8 @@ void arch_init(void *pointer)
         glbl_core_data->multiboot_flags = mb->flags;
 
         memset(&global->locks, 0, sizeof(global->locks));
-    }
-    else {
+    } else {
+        printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
     	global = (struct global *)GLOBAL_VBASE;
     	memset(&global->locks, 0, sizeof(global->locks));
 

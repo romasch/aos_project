@@ -23,6 +23,10 @@
 
 #include <barrelfish/aos_rpc.h>
 
+#include <barrelfish/cpu_arch.h>
+#include <elf/elf.h>
+#include <barrelfish_kpi/arm_core_data.h>
+
 // From Milestone 0...
 #define UART_BASE 0x48020000
 #define UART_SIZE 0x1000
@@ -511,6 +515,148 @@ static errval_t initep_setup (void)
     return err;
 } //*/
 
+static errval_t spawn_core_syscall(coreid_t cid, forvaddr_t entry)
+{
+    uint8_t invoke_bits = get_cap_valid_bits(cap_kernel);
+
+    uintptr_t syscall_id  = (invoke_bits <<  16) | (KernelCmd_Spawn_core << 8) | SYSCALL_INVOKE;
+    capaddr_t invoke_cptr = get_cap_addr(cap_kernel) >> (CPTR_BITS - invoke_bits)              ;
+
+    return syscall6(syscall_id, invoke_cptr, cid, CURRENT_CPU_TYPE, (uintptr_t)(entry >> 32), (uintptr_t) entry).error;
+}
+
+struct ElfDescriptor
+{
+    void      * vbase  ;
+    genvaddr_t  elfbase;
+};
+
+struct module_blob 
+{
+    size_t             size      ;
+    lvaddr_t           vaddr     ;
+    genpaddr_t         paddr     ;
+    struct mem_region* mem_region;
+};
+
+static errval_t elfload_allocate(void *state, genvaddr_t base, size_t size, uint32_t flags, void **retbase)
+{
+    struct ElfDescriptor *s = state;
+
+    *retbase = (char *)s->vbase + base - s->elfbase;
+
+    return SYS_ERR_OK;
+}
+
+static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, void *to, lvaddr_t reloc_dest, uintptr_t *reloc_entry)
+{
+    struct Elf32_Ehdr   * head    = (struct Elf32_Ehdr *)blob_start;
+    struct Elf32_Shdr   * symhead; 
+    struct Elf32_Shdr   * rel    ;
+    struct Elf32_Shdr   * symtab ;
+    struct ElfDescriptor  state  ;
+
+    genvaddr_t entry;
+    errval_t   err  ;
+
+    state.vbase   = to                          ;
+    state.elfbase = elf_virtual_base(blob_start);
+
+    err = elf_load(head->e_machine, elfload_allocate, &state, blob_start, blob_size, &entry);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Relocate to new physical base address
+    symhead = (struct Elf32_Shdr *)(blob_start + (uintptr_t)head->e_shoff);
+    rel     = elf32_find_section_header_type(symhead, head->e_shnum, SHT_REL   );
+    symtab  = elf32_find_section_header_type(symhead, head->e_shnum, SHT_DYNSYM);
+    
+    assert(rel != NULL && symtab != NULL);
+
+    elf32_relocate
+    (
+        reloc_dest                                          , 
+        state.elfbase                                       ,  
+        (struct Elf32_Rel *)(blob_start + rel   ->sh_offset), 
+        rel->sh_size                                        , 
+        (struct Elf32_Sym *)(blob_start + symtab->sh_offset), 
+        symtab->sh_size                                     , 
+        state.elfbase                                       , 
+        state.vbase
+    );
+
+    *reloc_entry = entry - state.elfbase + reloc_dest;
+
+    return SYS_ERR_OK;
+}
+
+static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **buf_ret, struct frame_identity *frameid)
+{
+    void         * buf = NULL;
+    struct capref  cap;
+    errval_t       err;
+    
+    err = frame_alloc(&cap, *size, size);
+    if (err_is_fail(err)) {
+        USER_PANIC("Failed to allocate %zd memory\n", *size);
+    }
+
+    // TODO: get one page
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VSPACE_MAP);
+    }
+
+    //TODO: and make it remote
+    if (err_is_fail(err)) {
+        return err;
+    }
+    
+    err = invoke_frame_identify(cap, frameid);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_FRAME_IDENTIFY);
+    }
+
+    *cap_ret = cap;
+    *buf_ret = buf;
+
+    return SYS_ERR_OK;
+}
+
+static errval_t spawn_core(coreid_t cid)
+{
+    struct module_blob cpu_blob;
+
+    errval_t  err         = SYS_ERR_OK;
+    uintptr_t reloc_entry;
+
+    // allocate memory for cpu driver: we allocate a page for arm_core_data and
+    // the reset for the elf image
+    assert(sizeof(struct arm_core_data) <= BASE_PAGE_SIZE);
+    struct {
+        size_t                 size   ;
+        struct capref          cap    ;
+        void                 * buf    ;
+        struct frame_identity  frameid;
+    } cpu_mem = {
+        .size = elf_virtual_size(cpu_blob.vaddr) + BASE_PAGE_SIZE
+    };
+
+    err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
+    if (!err_is_ok(err)) {
+        return err;
+    }
+    
+    // TODO: 
+    err = elf_load_and_relocate(0,0, cpu_mem.buf + BASE_PAGE_SIZE, cpu_mem.frameid.base + BASE_PAGE_SIZE, &reloc_entry);
+    if (err_is_ok(err))
+    {
+        err = spawn_core_syscall(cid, (forvaddr_t)reloc_entry);
+    }   
+
+    return SYS_ERR_OK;
+}
+
 int main(int argc, char *argv[])
 {
     set_external_handler (my_handler);
@@ -591,6 +737,13 @@ int main(int argc, char *argv[])
     struct lmp_chan memeater_chan;
     strcpy(ddb[1].name, "memeater");
     spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
+
+    for (int i = 0; i < 16; i++) {
+        if (i != my_core_id) {
+            if (false) // TODO: Uncomment this when second core will be ready
+                spawn_core(i);
+        }
+    }
 
     // Go into messaging main loop.
     while (true) {
