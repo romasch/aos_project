@@ -88,7 +88,7 @@ int start_aps_arm_start(uint8_t core_id, lpaddr_t entry)
 
         // Wait a bit to avoid races.
         // Later we may want for the other processor to set aux_core_boot_0 to AP_STARTED.
-        for (volatile int i = 0; i<10000; i++);
+        for (volatile int i = 0; i<1000000; i++);
 
     } else {
         error = SYS_ERR_CORE_NOT_FOUND;

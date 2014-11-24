@@ -553,9 +553,10 @@ void arch_init(void *pointer)
     struct arm_coredata_elf *elf = NULL;
     core_id = hal_get_cpu_id();
 
+    serial_early_init(serial_console_port);
 
     if (hal_cpu_is_bsp()) {
-    serial_early_init(serial_console_port);
+
         struct multiboot_info *mb = (struct multiboot_info *)pointer;
         elf = (struct arm_coredata_elf *)&mb->syms.elf;
     	memset(glbl_core_data, 0, sizeof(struct arm_core_data));
@@ -571,12 +572,18 @@ void arch_init(void *pointer)
 
         memset(&global->locks, 0, sizeof(global->locks));
     } else {
+        
         raw_serial_putchar ('?');
         raw_serial_putchar ('\r');
         raw_serial_putchar ('\n');
-        while (true) ; // NOTE: Loop forever...
+        // Create some havoc... This would be disastrous if kernels used same ELF image.
+        memset (&boot_l1_high, 0, sizeof (boot_l1_high));
+        memset (&boot_l1_low, 0, sizeof (boot_l1_low));
+        cp15_invalidate_i_and_d_caches_fast();
+        cp15_invalidate_tlb();
         printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
 
+        while (true) ; // NOTE: Loop forever...
 
     	global = (struct global *)GLOBAL_VBASE;
     	memset(&global->locks, 0, sizeof(global->locks));
