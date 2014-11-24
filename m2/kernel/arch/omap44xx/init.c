@@ -532,12 +532,13 @@ app_core_init(void *pointer)
 {
     // NOTE: This is basically the only safe thing to do
     // if started within the ELF image of the first kernel.
+    // NOTE that the "real" second kernel doesn't use this function.
     raw_serial_putchar ('*');
     raw_serial_putchar ('\r');
     raw_serial_putchar ('\n');
 //      printf ("in core-1 (id: %u)\n", hal_get_cpu_id());
-    while(true); // NOTE: Go into endless loop. Later we may call arch_init();
-//     arch_init (pointer);
+//     while(true); // NOTE: Go into endless loop. Later we may call arch_init();
+    arch_init (pointer);
 }
 
 extern uint8_t core_id;
@@ -552,10 +553,9 @@ void arch_init(void *pointer)
     struct arm_coredata_elf *elf = NULL;
     core_id = hal_get_cpu_id();
 
-    if (hal_cpu_is_bsp()) {
-        // NOTE: Moved here to avoid double initialization.
-        serial_early_init(serial_console_port);
 
+    if (hal_cpu_is_bsp()) {
+    serial_early_init(serial_console_port);
         struct multiboot_info *mb = (struct multiboot_info *)pointer;
         elf = (struct arm_coredata_elf *)&mb->syms.elf;
     	memset(glbl_core_data, 0, sizeof(struct arm_core_data));
@@ -571,7 +571,13 @@ void arch_init(void *pointer)
 
         memset(&global->locks, 0, sizeof(global->locks));
     } else {
+        raw_serial_putchar ('?');
+        raw_serial_putchar ('\r');
+        raw_serial_putchar ('\n');
+        while (true) ; // NOTE: Loop forever...
         printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
+
+
     	global = (struct global *)GLOBAL_VBASE;
     	memset(&global->locks, 0, sizeof(global->locks));
 

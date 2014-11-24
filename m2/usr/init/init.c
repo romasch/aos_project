@@ -515,7 +515,7 @@ static errval_t initep_setup (void)
     return err;
 } //*/
 
-static errval_t spawn_core_syscall(coreid_t cid, forvaddr_t entry)
+/*static errval_t spawn_core_syscall(coreid_t cid, forvaddr_t entry)
 {
     uint8_t invoke_bits = get_cap_valid_bits(cap_kernel);
 
@@ -523,7 +523,7 @@ static errval_t spawn_core_syscall(coreid_t cid, forvaddr_t entry)
     capaddr_t invoke_cptr = get_cap_addr(cap_kernel) >> (CPTR_BITS - invoke_bits)              ;
 
     return syscall6(syscall_id, invoke_cptr, cid, CURRENT_CPU_TYPE, (uintptr_t)(entry >> 32), (uintptr_t) entry).error;
-}
+}*/
 
 struct ElfDescriptor
 {
@@ -563,6 +563,7 @@ static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, voi
     state.elfbase = elf_virtual_base(blob_start);
 
     err = elf_load(head->e_machine, elfload_allocate, &state, blob_start, blob_size, &entry);
+    assert (err_is_ok (err));
     if (err_is_fail(err)) {
         return err;
     }
@@ -585,6 +586,7 @@ static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, voi
         state.elfbase                                       , 
         state.vbase
     );
+    assert (err_is_ok (err));
 
     *reloc_entry = entry - state.elfbase + reloc_dest;
 
@@ -598,21 +600,26 @@ static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **
     errval_t       err;
     
     err = frame_alloc(&cap, *size, size);
+    assert (err_is_ok (err));
     if (err_is_fail(err)) {
         USER_PANIC("Failed to allocate %zd memory\n", *size);
     }
 
-    // TODO: get one page
+    // map the frame
+//     err = vspace_map_one_frame(&buf, *size, cap, NULL, NULL);
+    err = paging_map_frame_attr (get_current_paging_state(), &buf, *size, cap, VREGION_FLAGS_READ_WRITE_NOCACHE | VREGION_FLAGS_EXECUTE, NULL, NULL);
+    assert (err_is_ok (err));
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VSPACE_MAP);
     }
 
-    //TODO: and make it remote
+    //TODO: and make it remote <- not necessary
     if (err_is_fail(err)) {
         return err;
     }
     
     err = invoke_frame_identify(cap, frameid);
+    assert (err_is_ok (err));
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_FRAME_IDENTIFY);
     }
@@ -625,10 +632,28 @@ static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **
 
 static errval_t spawn_core(coreid_t cid)
 {
-    struct module_blob cpu_blob;
+    errval_t err = SYS_ERR_OK;
 
-    errval_t  err         = SYS_ERR_OK;
-    uintptr_t reloc_entry;
+    struct mem_region* module = NULL;
+    size_t binary_size = 0;
+    lvaddr_t binary_virtual_addr = 0;
+    genpaddr_t binary_physical_addr = 0;
+
+    // Parse multiboot info.
+    module = multiboot_find_module(bi, "armv7/sbin/cpu_omap44xx");
+    assert (module != NULL); // TODO
+
+    // Map the binary blob into our address space.
+    err = spawn_map_module (module, &binary_size, &binary_virtual_addr, &binary_physical_addr);
+    assert (err_is_ok (err));
+
+
+    struct module_blob cpu_blob;
+    cpu_blob.size = binary_size;
+    cpu_blob.paddr = binary_physical_addr;
+    cpu_blob.vaddr = binary_virtual_addr;
+    cpu_blob.mem_region = module;
+
 
     // allocate memory for cpu driver: we allocate a page for arm_core_data and
     // the reset for the elf image
@@ -643,18 +668,24 @@ static errval_t spawn_core(coreid_t cid)
     };
 
     err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
-    if (!err_is_ok(err)) {
+    assert (err_is_ok (err));
+    if (err_is_fail(err)) {
         return err;
     }
-    
-    // TODO: 
-    err = elf_load_and_relocate(0,0, cpu_mem.buf + BASE_PAGE_SIZE, cpu_mem.frameid.base + BASE_PAGE_SIZE, &reloc_entry);
-    if (err_is_ok(err))
-    {
-        err = spawn_core_syscall(cid, (forvaddr_t)reloc_entry);
-    }   
 
-    return SYS_ERR_OK;
+    uintptr_t reloc_entry;
+
+    err = elf_load_and_relocate(cpu_blob.vaddr,
+                                cpu_blob.size,
+                                cpu_mem.buf + BASE_PAGE_SIZE,
+                                cpu_mem.frameid.base + BASE_PAGE_SIZE,
+                                &reloc_entry);
+    assert (err_is_ok (err));
+
+    err = sys_boot_core (cid, reloc_entry);
+//        err = spawn_core_syscall(cid, (forvaddr_t)reloc_entry);
+
+    return err;
 }
 
 int main(int argc, char *argv[])
@@ -740,9 +771,9 @@ int main(int argc, char *argv[])
 
 
     assert (my_core_id == 0);
-    err = sys_boot_core (1, 0);
-    if (false) // TODO: Uncomment this when second core will be ready
-        spawn_core(1);
+//     err = sys_boot_core (1, 0);
+//     if (false) // TODO: Uncomment this when second core will be ready
+    err = spawn_core(1);
     debug_printf ("spawn_core: %s\n", err_getstring (err));
 
     // Go into messaging main loop.
