@@ -35,6 +35,8 @@
  * PandaBoard specific
 */
 
+void start_aps_remap (uint32_t base);
+
 void send_event(void);
 
 int start_aps_arm_start(uint8_t core_id, lvaddr_t entry);

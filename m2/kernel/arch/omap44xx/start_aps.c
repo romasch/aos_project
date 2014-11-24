@@ -24,6 +24,18 @@
 
 #define STARTUP_TIMEOUT         0xffffff
 
+
+static volatile uint32_t* aux_core_boot_0 = (volatile uint32_t*) AUX_CORE_BOOT_0;
+static volatile uint32_t* aux_core_boot_1 = (volatile uint32_t*) AUX_CORE_BOOT_1;
+
+
+// Remap the base registers.
+void start_aps_remap (uint32_t base)
+{
+    aux_core_boot_0 = (volatile uint32_t*)(base +(AUX_CORE_BOOT_0 & ARM_L1_SECTION_MASK));
+    aux_core_boot_1 = (volatile uint32_t*)(base +(AUX_CORE_BOOT_1 & ARM_L1_SECTION_MASK));
+}
+
 /**
  * Send event to other core
  * Note: this is PandaBoard_specific
@@ -53,25 +65,30 @@ void app_core_start(void); // defined in boot.S
 int start_aps_arm_start(uint8_t core_id, lpaddr_t entry)
 {
     // TODO: you might want to implement this function
+
+    // NOTE: Do not call print here.
+
     errval_t error = SYS_ERR_OK;
 
     if (core_id == 1) {
         // Set up the first register.
         // NOTE: Bits [3:2] should not be zero, otherwise the core will ignore the interrupt.
         // See OMAP TRM Page 1144
-        volatile uint32_t* app_core_data_register = (volatile uint32_t*) AUX_CORE_BOOT_0;
-        *app_core_data_register = (4 | 8);
+        *aux_core_boot_0 = AP_STARTING_UP;
 
         // Set up the entry address.
-        volatile uint32_t* app_core_entry_register = (volatile uint32_t*) AUX_CORE_BOOT_1;
         if (entry == 0) {
-            *app_core_entry_register = (volatile uint32_t) &app_core_start;
+            *aux_core_boot_1 = (volatile uint32_t) &app_core_start;
         } else {
-            *app_core_entry_register = entry;
+            *aux_core_boot_1 = entry;
         }
 
         // Send the interrrupt.
         send_event ();
+
+        // Wait a bit to avoid races.
+        // Later we may want for the other processor to set aux_core_boot_0 to AP_STARTED.
+        for (volatile int i = 0; i<10000; i++);
 
     } else {
         error = SYS_ERR_CORE_NOT_FOUND;

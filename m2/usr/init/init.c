@@ -738,12 +738,12 @@ int main(int argc, char *argv[])
     strcpy(ddb[1].name, "memeater");
     spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
 
-    for (int i = 0; i < 16; i++) {
-        if (i != my_core_id) {
-            if (false) // TODO: Uncomment this when second core will be ready
-                spawn_core(i);
-        }
-    }
+
+    assert (my_core_id == 0);
+    err = sys_boot_core (1, 0);
+    if (false) // TODO: Uncomment this when second core will be ready
+        spawn_core(1);
+    debug_printf ("spawn_core: %s\n", err_getstring (err));
 
     // Go into messaging main loop.
     while (true) {

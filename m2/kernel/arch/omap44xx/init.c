@@ -375,6 +375,9 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
                                aux_core_boot_section);
         debug(SUBSYS_STARTUP, "aux_core_boot_section mapped at %"PRIxLVADDR"\n",
                                aux_core_boot_section);
+
+        // Remap device section.
+        start_aps_remap (aux_core_boot_section);
     }
 //    start_another_core_v2 (); while(true);
 //    start_aps_arm_start(1,  (lpaddr_t) app_core_start);  while(true);
@@ -382,6 +385,8 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
     gic_init();
     //gic_init();
     printk(LOG_NOTE, "gic_init done\n");
+
+
 
 #if 0
     if (my_core_id == 0) {
@@ -507,12 +512,30 @@ static void size_ram(void)
     ram_size = sz;
 }
 
+__attribute__((unused))
+static void raw_serial_putchar(char c)
+{
+    volatile uint32_t *l_uart_thr = (uint32_t *)(0x48020000 + 0x0000);
+    volatile uint32_t *l_uart_lsr = (uint32_t *)(0x48020000 + 0x0014);
+
+    // Wait until FIFO can hold more characters (i.e. TX_FIFO_E == 1)
+    while ( ((*l_uart_lsr) & 0x20) == 0 ) {
+        // Do nothing
+    }
+    // Write character
+    *l_uart_thr = c;
+}
 
 void app_core_init(void *pointer);
 void  __attribute__ ((noinline,noreturn))
 app_core_init(void *pointer)
 {
-    printf ("in core-1 (id: %u)\n", hal_get_cpu_id());
+    // NOTE: This is basically the only safe thing to do
+    // if started within the ELF image of the first kernel.
+    raw_serial_putchar ('*');
+    raw_serial_putchar ('\r');
+    raw_serial_putchar ('\n');
+//      printf ("in core-1 (id: %u)\n", hal_get_cpu_id());
     while(true); // NOTE: Go into endless loop. Later we may call arch_init();
 //     arch_init (pointer);
 }
@@ -532,12 +555,6 @@ void arch_init(void *pointer)
     if (hal_cpu_is_bsp()) {
         // NOTE: Moved here to avoid double initialization.
         serial_early_init(serial_console_port);
-
-        // NOTE: We'll temporarily start the second core.
-        // Once we have user-space boot we can remove this.
-        printf ("in core-0 (id: %u)\n", core_id);
-        start_aps_arm_start (1, 0);
-        for (volatile int wait = 0; wait < 10000; wait++); // prevents garbage output due to races
 
         struct multiboot_info *mb = (struct multiboot_info *)pointer;
         elf = (struct arm_coredata_elf *)&mb->syms.elf;
@@ -571,7 +588,6 @@ void arch_init(void *pointer)
     	elf = &core_data->elf;
         printk(LOG_NOTE, "|%s|\n", glbl_core_data->cmdline);
     }
-
 
     // XXX: print kernel address for debugging with gdb
     printk(LOG_NOTE, "Barrelfish OMAP44xx CPU driver starting at"
