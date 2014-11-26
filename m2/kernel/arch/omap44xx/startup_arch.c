@@ -15,6 +15,7 @@
 #include <barrelfish_kpi/init.h>
 #include <barrelfish_kpi/syscalls.h>
 #include <elf/elf.h>
+#include <barrelfish_kpi/arm_core_data.h>
 
 #include <arm_hal.h>
 #include <paging_kernel_arch.h>
@@ -73,6 +74,26 @@ struct bootinfo* bootinfo = (struct bootinfo*)INIT_BOOTINFO_VBASE;
  */
 struct global *global = (struct global *)GLOBAL_VBASE;
 
+/*
+    Allocator for spawn_app_init
+*/
+static lpaddr_t app_alloc_phys_start;
+static lpaddr_t app_alloc_phys_end  ;
+
+static lpaddr_t app_alloc_phys(size_t size)
+{
+    lpaddr_t addr   = app_alloc_phys_start                        ;
+    uint32_t npages = (size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
+
+    app_alloc_phys_start += npages * BASE_PAGE_SIZE;
+    
+    if (app_alloc_phys_start >= app_alloc_phys_end) {   
+        panic("APP OOM Kill! CODE_DATA_PAGES must be lager!"); 
+    }
+
+    return addr;   
+}
+
 static inline uintptr_t round_up(uintptr_t value, size_t unit)
 {
     assert(0 == (unit & (unit - 1)));
@@ -89,8 +110,8 @@ static inline uintptr_t round_down(uintptr_t value, size_t unit)
 
 extern size_t ram_size;
 
-static lpaddr_t core_local_alloc_start = PHYS_MEMORY_START;
-static lpaddr_t core_local_alloc_end = PHYS_MEMORY_START;
+static lpaddr_t bsp_init_alloc_addr  = PHYS_MEMORY_START;
+static lpaddr_t bsp_init_alloc_end = PHYS_MEMORY_START;
 
 /**
  * \brief Linear physical memory allocator.
@@ -107,18 +128,18 @@ static lpaddr_t bsp_alloc_phys(size_t size)
     // round to base page size
     uint32_t npages = (size + BASE_PAGE_SIZE - 1) / BASE_PAGE_SIZE;
 
-    assert(core_local_alloc_start != 0);
-    assert((core_local_alloc_start + (npages * BASE_PAGE_SIZE))
-            < core_local_alloc_end);
-    lpaddr_t addr = core_local_alloc_start;
+    assert(bsp_init_alloc_addr != 0);
+    assert((bsp_init_alloc_addr + (npages * BASE_PAGE_SIZE))
+            < bsp_init_alloc_end);
+    lpaddr_t addr = bsp_init_alloc_addr;
 
-    core_local_alloc_start += npages * BASE_PAGE_SIZE;
+    bsp_init_alloc_addr += npages * BASE_PAGE_SIZE;
     return addr;
 }
 
 static lpaddr_t bsp_alloc_phys_aligned(size_t size, size_t align)
 {
-    core_local_alloc_start = round_up(core_local_alloc_start, align);
+    bsp_init_alloc_addr = round_up(bsp_init_alloc_addr, align);
     return bsp_alloc_phys(size);
 }
 
@@ -576,7 +597,7 @@ static char *basename(const char *path)
     return p + 1;
 }
 
-
+// TODO: we really need last two parameters????
 struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
         struct cte *rootcn, struct spawn_state *spawn_state)
 {
@@ -624,8 +645,8 @@ struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
         create_module_caps(spawn_state, alloc_phys_fn);
         lpaddr_t free_ram_start = alloc_phys_fn(0);
         printk(LOG_NOTE, "creating caps for %"PRIxLPADDR" -- %"PRIxLPADDR"\n",
-                free_ram_start, core_local_alloc_end);
-        create_phys_caps(free_ram_start, core_local_alloc_end, spawn_state);
+                free_ram_start, bsp_init_alloc_end);
+        create_phys_caps(free_ram_start, bsp_init_alloc_end, spawn_state);
 
         /*
          * we create the capability to the devices at this stage and store it
@@ -657,110 +678,72 @@ __attribute__((unused)) static void check_error (errval_t error)
     }
 }
 
+struct dcb* spawn_app_init(struct arm_core_data* core_data, const char* name)
+{
+    static struct cte init_rootcn;
+
+    struct dcb        * init_dcb;
+    struct spawn_state  init_st ;
+
+    char bootinfochar[16];
+
+    /* Construct cmdline args */
+    snprintf(bootinfochar, sizeof(bootinfochar), "%u", INIT_BOOTINFO_VBASE);
+
+    const char *argv[] = { basename(name), bootinfochar };
+    
+    init_dcb = spawn_init_common(name, 2, argv, 0, app_alloc_phys, &init_rootcn, &init_st);
+    
+    // TODO finish this part
+
+    return init_dcb;
+}
+
 void arm_kernel_startup(void)
 {
-    printk(LOG_NOTE, "arm_kernel_startup entered \n");
-
-    /* Initialize the core_data */
-    /* Used when bringing up other cores, must be at consistent global address
-     * seen by all cores */
-    struct arm_core_data *core_data
-        = (void *)((lvaddr_t)&kernel_first_byte - BASE_PAGE_SIZE);
-
     struct dcb *init_dcb;
 
-    if(hal_cpu_is_bsp())
-    {
+    printf("arm_kernel_startup entered \n");
+    
+    if(hal_cpu_is_bsp()) {
+        static struct cte init_rootcn;
+
+        struct spawn_state init_st;
+
         debug(SUBSYS_STARTUP, "Doing BSP related bootup \n");
 
-    	/* Initialize the location to allocate phys memory from */
-        core_local_alloc_start = glbl_core_data->start_free_ram;
-        core_local_alloc_end = PHYS_MEMORY_START + ram_size;
+        bsp_init_alloc_addr = glbl_core_data->start_free_ram;
+        bsp_init_alloc_end  = PHYS_MEMORY_START   + ram_size;
 
-#if MILESTONE == 3
-        // Bring up memory consuming process
-        struct spawn_state memeater_st;
-        struct dcb *memeater_dcb;
-        memset(&memeater_st, 0, sizeof(struct spawn_state));
-        static struct cte memeater_rootcn; // gets put into mdb
-        memeater_dcb = spawn_bsp_init(ADDTITIONAL_MODULE_NAME,
-                                      bsp_alloc_phys, &memeater_rootcn, &memeater_st);
-#endif
-
-        // Bring up init
-        struct spawn_state init_st;
         memset(&init_st, 0, sizeof(struct spawn_state));
-        static struct cte init_rootcn; // gets put into mdb
-        init_dcb = spawn_bsp_init(BSP_INIT_MODULE_NAME, bsp_alloc_phys,
-                                  &init_rootcn, &init_st);
-
-#if MILESTONE == 3
-        // TODO (milestone 3): create endpoints for domains:
-        // 1) selfep for each domain -- retype dcb cap into TASKCN_SLOT_SELFEP
-        errval_t error;
-        error = caps_retype (
-                ObjType_EndPoint,   // enum objtype type,
-                0,                  // size_t objbits,
-                C (init_st.taskcn), // struct capability *dest_cnode,
-                TASKCN_SLOT_SELFEP, // cslot_t dest_slot,
-                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_DISPATCHER),   // struct cte *src_cte,
-                false               // bool from_monitor);
-            );
-        check_error (error);
-
-        error = caps_retype (
-                ObjType_EndPoint,   // enum objtype type,
-                0,                  // size_t objbits,
-                C (memeater_st.taskcn),   // struct capability *dest_cnode,
-                TASKCN_SLOT_SELFEP, // cslot_t dest_slot,
-                caps_locate_slot (CNODE(memeater_st.taskcn),TASKCN_SLOT_DISPATCHER),   // struct cte *src_cte,
-                false               // bool from_monitor);
-            );
-        check_error (error);
-
-        // 2) create init's receive ep -- mint init's self ep into
-        //    TASKCN_SLOT_INITEP & use FIRSTEP_{OFFSET,BUFLEN} as arguments
-        //    for minting.
-        error = caps_copy_to_cnode (
-                init_st.taskcn,     // struct cte *dest_cnode_cte,
-                TASKCN_SLOT_INITEP, // dest_slot,
-                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_SELFEP), // struct cte *src_cte,
-                true,               // bool mint,
-                FIRSTEP_OFFSET,     // uintptr_t param1,
-                FIRSTEP_BUFLEN      // uintptr_t param2
-            );
-        check_error (error);
-
-        // 3) copy init's receive ep into all other domains'
-        //    TASKCN_SLOT_INITEP.
-        error = caps_copy_to_cnode (
-                memeater_st.taskcn, //&(memeater_dcb->cspace),    // struct cte *dest_cnode_cte,
-                TASKCN_SLOT_INITEP, // dest_slot,
-                caps_locate_slot (CNODE(init_st.taskcn),TASKCN_SLOT_INITEP), // struct cte *src_cte,
-                false,              // bool mint,
-                0,                  // uintptr_t param1,
-                0                   // uintptr_t param2
-            );
-        check_error (error);
-#endif
+        
+        init_dcb = spawn_bsp_init(BSP_INIT_MODULE_NAME, bsp_alloc_phys, &init_rootcn, &init_st);
     } else {
         debug(SUBSYS_STARTUP, "Doing non-BSP related bootup \n");
+
+        app_alloc_phys_start =                                        glbl_core_data->memory_base_start ;
+        app_alloc_phys_end   = app_alloc_phys_start + ((lpaddr_t)1 << glbl_core_data->memory_bits      );
+
+        int core_id = hal_get_cpu_id();
+        printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
+        if (!hal_cpu_is_bsp()) {
+            while (true) ; // NOTE: Loop forever...
+        }
+
+        //init_dcb = spawn_app_init(glbl_core_data, ADDTITIONAL_MODULE_NAME);
         init_dcb = NULL;
 
-    	my_core_id = core_data->dst_core_id;
-
-        // TODO (multicore milestone): setup init domain for core 1
-
-    	uint32_t irq = gic_get_active_irq();
-    	gic_ack_irq(irq);
+        gic_ack_irq(gic_get_active_irq());
     }
 
-    // Should not return
-    printk(LOG_NOTE, "Calling dispatch from arm_kernel_startup, start address is=%"
-            PRIxLVADDR"\n",
-            get_dispatcher_shared_arm(init_dcb->disp)->enabled_save_area.named.r0);
-    dispatch(init_dcb);
-    panic("Error spawning init!");
+    printk(
+        LOG_NOTE                                                                    , 
+        "Calling dispatch from arm_kernel_startup, start address is=%"PRIxLVADDR"\n", 
+        get_dispatcher_shared_arm(init_dcb->disp)->enabled_save_area.named.r0
+    );
 
+    dispatch(init_dcb);
+
+    panic("Error spawning init!");
 }
 

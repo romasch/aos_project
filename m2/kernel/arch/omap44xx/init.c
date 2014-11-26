@@ -283,134 +283,66 @@ void kernel_startup_early(void)
  */
 static void  __attribute__ ((noinline,noreturn)) text_init(void)
 {
-    printk(LOG_NOTE, "in text_init\n");
-    errval_t errval;
+    char          buf[200];
+    errval_t      errval  ;
+    omap44xx_id_t id      ;
 
-    // Relocate glbl_core_data to "memory"
-    glbl_core_data = (struct arm_core_data *)
-        local_phys_to_mem((lpaddr_t)glbl_core_data);
-
-    // Relocate global to "memory"
-    global = (struct global*)local_phys_to_mem((lpaddr_t)global);
-
-    // Map-out low memory
-    if(glbl_core_data->multiboot_flags & MULTIBOOT_INFO_FLAG_HAS_MMAP)
-    {
-//        struct arm_coredata_mmap *mmap = (struct arm_coredata_mmap *)
-//            local_phys_to_mem(glbl_core_data->mmap_addr);
-        //paging_arm_reset(mmap->base_addr, mmap->length);
-        paging_arm_reset(0x80000000, 0x40000000);
-    }
-    else
-    {
-        paging_arm_reset(0x80000000, 0x40000000);
+    if(glbl_core_data->multiboot_flags & MULTIBOOT_INFO_FLAG_HAS_MMAP) {
+        struct arm_coredata_mmap* mmap = (struct arm_coredata_mmap*)local_phys_to_mem(glbl_core_data->mmap_addr);
+        
+        paging_arm_reset(mmap->base_addr, mmap->length);
+    } else {
+        paging_arm_reset(PHYS_MEMORY_START, 0x40000000);
     }
 
-    printk(LOG_NOTE, "exc init\n");
     exceptions_init();
 
-    printk(LOG_NOTE, "invalidate cache\n");
     cp15_invalidate_i_and_d_caches_fast();
+    cp15_invalidate_tlb                ();
 
-    printk(LOG_NOTE, "invalidate TLB\n");
-    cp15_invalidate_tlb();
-
-    printk(LOG_NOTE, "startup_early\n");
-
-    kernel_startup_early();
-    printk(LOG_NOTE, "kernel_startup_early done!\n");
-
-
-    // remap the LED regisers
-    led_remap_register();
-
-    printk(LOG_NOTE, "flashing LED after remapping\n");
-    led_flash(10);
-    printk(LOG_NOTE, "done with flashing LED\n");
-
-    //initialize console
-    serial_init(serial_console_port);
-
-    printk(LOG_NOTE, "Barrelfish CPU driver starting on ARMv7 OMAP44xx"
-           " Board id 0x%08"PRIx32"\n", hal_get_board_id());
-    printk(LOG_NOTE, "The address of paging_map_kernel_section is %p\n",
-           paging_map_kernel_section);
-
+    kernel_startup_early(                   );
+    serial_init         (serial_console_port);
+    
+    printk(LOG_NOTE, "Barrelfish CPU driver starting on ARMv7 OMAP44xx Board id 0x%08"PRIx32"\n", hal_get_board_id()       );
+    printk(LOG_NOTE, "The address of paging_map_kernel_section is %p\n"                         , paging_map_kernel_section);
+    
     errval = serial_debug_init();
-    if (err_is_fail(errval))
-    {
-        printk(LOG_NOTE, "Failed to initialize debug port: %d",
-                serial_debug_port);
+    if (err_is_fail(errval)) {
+        printk(LOG_NOTE, "Failed to initialize debug port: %d", serial_debug_port);
     }
 
+    if (my_core_id != hal_get_cpu_id()) {
+        my_core_id = hal_get_cpu_id();
+    }
 
-    my_core_id = hal_get_cpu_id();
-    printk(LOG_NOTE, "cpu id %d\n", my_core_id);
-
-//    start_another_core(); while(true); // works
     // Test MMU by remapping the device identifier and reading it using a
     // virtual address
-    lpaddr_t id_code_section = OMAP44XX_MAP_L4_CFG_SYSCTRL_GENERAL_CORE & ~ARM_L1_SECTION_MASK;
-    lvaddr_t id_code_remapped = paging_map_device(id_code_section,
-                                                  ARM_L1_SECTION_BYTES);
+    lpaddr_t id_code_section  = OMAP44XX_MAP_L4_CFG_SYSCTRL_GENERAL_CORE & ~ARM_L1_SECTION_MASK;
+    lvaddr_t id_code_remapped = paging_map_device(id_code_section, ARM_L1_SECTION_BYTES);
 
-//    start_another_core(); while(true);  // fails
-    omap44xx_id_t id;
-    omap44xx_id_initialize(&id, (mackerel_addr_t)(id_code_remapped +
-	     (OMAP44XX_MAP_L4_CFG_SYSCTRL_GENERAL_CORE & ARM_L1_SECTION_MASK)));
-
-    char buf[200];
-    omap44xx_id_code_pr(buf,200,&id);
+    omap44xx_id_initialize(&id, (mackerel_addr_t)(id_code_remapped + (OMAP44XX_MAP_L4_CFG_SYSCTRL_GENERAL_CORE & ARM_L1_SECTION_MASK)));
+    
+    omap44xx_id_code_pr(buf, 200, &id);
     printk(LOG_NOTE, "Using MMU, %s", buf);
 
-    // map aux_core_boot_section if necessary
-    if (!aux_core_boot_section) {
-        lpaddr_t aux_core_boot_section_phys = AUX_CORE_BOOT_0 &
-            ~ARM_L1_SECTION_MASK;
-        aux_core_boot_section = paging_map_device(aux_core_boot_section_phys,
-                                                  ARM_L1_SECTION_BYTES);
-        shared_var = (uint32_t*)(aux_core_boot_section +
-                (AUX_CORE_BOOT_0 & ARM_L1_SECTION_MASK));
-        printk(LOG_NOTE, "aux_core_boot_section mapped at %"PRIxLVADDR"\n",
-                               aux_core_boot_section);
-        debug(SUBSYS_STARTUP, "aux_core_boot_section mapped at %"PRIxLVADDR"\n",
-                               aux_core_boot_section);
-
-        // Remap device section.
-        start_aps_remap (aux_core_boot_section);
-    }
-//    start_another_core_v2 (); while(true);
-//    start_aps_arm_start(1,  (lpaddr_t) app_core_start);  while(true);
-
     gic_init();
-    //gic_init();
     printk(LOG_NOTE, "gic_init done\n");
 
-
-
-#if 0
-    if (my_core_id == 0) {
-        pic_init();
-        //gic_init();
-        printk(LOG_NOTE, "pic_init done\n");
-    } else {
-
-        printk(LOG_NOTE, "not doing pic_init on core-1, just looping\n");
-        while(true);
-        printk(LOG_NOTE, "looping done\n");
-    }
-#endif // 0
+    led_remap_register(  );
+    led_flash         (10);
 
     if (hal_cpu_is_bsp()) {
+        uint32_t omap_num_cores;
 
         scu_initialize();
-        uint32_t omap_num_cores = scu_get_core_count();
-        printk(LOG_NOTE, "Number of cores in system: %"PRIu32"\n",
-                omap_num_cores);
+
+        omap_num_cores = scu_get_core_count();
+        printk(LOG_NOTE, "Number of cores in system: %"PRIu32"\n", omap_num_cores);
 
         // ARM Cortex A9 TRM section 2.1
-        if (omap_num_cores > 4)
+        if (omap_num_cores > 4) {
             panic("ARM SCU doesn't support more than 4 cores!");
+        }
 
         // init SCU if more than one core present
         if (omap_num_cores > 1) {
@@ -418,49 +350,24 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
         }
     }
 
-    // Declaring that the core is up and running
-    // Important for application core as BSP core will wait for this
-    // value to change
-
-    if (!hal_cpu_is_bsp()) {
-
-        // tell BSP that we are started up
-        // XXX NYI: See Section 27.4.4 in the OMAP44xx manual for how this
-        // should work.
-        // signal the other end
-        volatile uint32_t *ap_wait =
-            (volatile uint32_t*)local_phys_to_mem(AP_WAIT_PHYS);
-        printk(LOG_NOTE, "### AP_WAIT lock location %p\n", ap_wait);
-        printk(LOG_NOTE, "### AP_WAIT previous value %"PRIu32"\n", *ap_wait);
-        *ap_wait = AP_STARTED;
-        cp15_invalidate_d_cache();
-        printk(LOG_NOTE, "### AP_WAIT set to %"PRIu32"\n", *ap_wait);
-
-        volatile lvaddr_t *aux_core_boot_0 = (lpaddr_t*)(aux_core_boot_section +
-                (AUX_CORE_BOOT_0 & ARM_L1_SECTION_MASK));
-        *aux_core_boot_0 = 2 << 2;
-
-#if 0
-        // FIXME: for debugging printf interleavings
-        uint32_t counter = 0;
-        while(true) {
-//            printk(LOG_NOTE, "### core-1 printing %"PRIu32"\n", counter);
-            ++counter;
-        }
-#endif // 0
-
-    }
-
     tsc_init();
     printf("tsc_init done --\n");
-#ifndef __gem5__
-    enable_cycle_counter_user_access();
-    reset_cycle_counter();
-#endif
+    
+    #ifndef __gem5__
+        enable_cycle_counter_user_access();
+        reset_cycle_counter             ();
+    #endif
 
-    // tell BSP that we are started up
-    // XXX NYI: See Section 27.4.4 in the OMAP44xx manual for how this
-    // should work. 
+    // map aux_core_boot_section if necessary
+    if (!aux_core_boot_section) {
+        lpaddr_t aux_core_boot_section_phys = AUX_CORE_BOOT_0 & ~ARM_L1_SECTION_MASK;
+
+        aux_core_boot_section =          paging_map_device(aux_core_boot_section_phys, ARM_L1_SECTION_BYTES );
+        shared_var            = (uint32_t*)(aux_core_boot_section + (AUX_CORE_BOOT_0 & ARM_L1_SECTION_MASK ));
+
+        // Remap device section.
+        start_aps_remap(aux_core_boot_section);
+    }
 
     arm_kernel_startup();
 }
@@ -489,15 +396,17 @@ static size_t bank_size(int bank, lpaddr_t base)
     omap44xx_emif_t emif;
     omap44xx_emif_initialize(&emif, (mackerel_addr_t)base);
     if (omap44xx_emif_status_phy_dll_ready_rdf(&emif)) {
-	rowbits = omap44xx_emif_sdram_config_rowsize_rdf(&emif) + 9;
-	colbits = omap44xx_emif_sdram_config_pagesize_rdf(&emif) + 9;
-	rowsize = omap44xx_emif_sdram_config2_rdbsize_rdf(&emif) + 5;
-	printk(LOG_NOTE, "EMIF%d: ready, %d-bit rows, %d-bit cols, %d-byte row buffer\n",
-	       bank, rowbits, colbits, 1<<rowsize);
-	return (1 << (rowbits + colbits + rowsize));
+	    rowbits = omap44xx_emif_sdram_config_rowsize_rdf (&emif) + 9;
+	    colbits = omap44xx_emif_sdram_config_pagesize_rdf(&emif) + 9;
+	    rowsize = omap44xx_emif_sdram_config2_rdbsize_rdf(&emif) + 5;
+	    
+        printk(LOG_NOTE, "EMIF%d: ready, %d-bit rows, %d-bit cols, %d-byte row buffer\n", bank, rowbits, colbits, 1<<rowsize);
+	
+        return (1 << (rowbits + colbits + rowsize));
     } else {
-	printk(LOG_NOTE, "EMIF%d doesn't seem to have any DDRAM attached.\n", bank);
-	return 0;
+	    printk(LOG_NOTE, "EMIF%d doesn't seem to have any DDRAM attached.\n", bank);
+	
+        return 0;
     }
 }
 
@@ -507,8 +416,7 @@ static void size_ram(void)
 {
     size_t sz = 0;
     sz = bank_size(1, OMAP44XX_MAP_EMIF1) + bank_size(2, OMAP44XX_MAP_EMIF2);
-    printk(LOG_NOTE, "We seem to have 0x%08lx bytes of DDRAM: that's %s.\n",
-	   sz, sz == 0x40000000 ? "about right" : "unexpected" );
+    printk(LOG_NOTE, "We seem to have 0x%08lx bytes of DDRAM: that's %s.\n", sz, sz == 0x40000000 ? "about right" : "unexpected" );
     ram_size = sz;
 }
 
@@ -536,8 +444,7 @@ app_core_init(void *pointer)
     raw_serial_putchar ('*');
     raw_serial_putchar ('\r');
     raw_serial_putchar ('\n');
-//      printf ("in core-1 (id: %u)\n", hal_get_cpu_id());
-//     while(true); // NOTE: Go into endless loop. Later we may call arch_init();
+
     arch_init (pointer);
 }
 
@@ -549,73 +456,42 @@ extern uint8_t core_id;
  */
 void arch_init(void *pointer)
 {
-
-    struct arm_coredata_elf *elf = NULL;
-    core_id = hal_get_cpu_id();
-
     serial_early_init(serial_console_port);
-
+    
     if (hal_cpu_is_bsp()) {
+        struct multiboot_info *mb = pointer;
 
-        struct multiboot_info *mb = (struct multiboot_info *)pointer;
-        elf = (struct arm_coredata_elf *)&mb->syms.elf;
-    	memset(glbl_core_data, 0, sizeof(struct arm_core_data));
-        glbl_core_data->start_free_ram = ROUND_UP(max(multiboot_end_addr(mb),
-                    (uintptr_t)&kernel_final_byte), BASE_PAGE_SIZE);
+        size_t max_addr = max(multiboot_end_addr(mb), (uintptr_t)&kernel_final_byte);
 
-        glbl_core_data->mods_addr = mb->mods_addr;
-        glbl_core_data->mods_count = mb->mods_count;
-        glbl_core_data->cmdline = mb->cmdline;
-        glbl_core_data->mmap_length = mb->mmap_length;
-        glbl_core_data->mmap_addr = mb->mmap_addr;
-        glbl_core_data->multiboot_flags = mb->flags;
-
-        memset(&global->locks, 0, sizeof(global->locks));
-    } else {
+        memset(glbl_core_data, 0, sizeof(struct arm_core_data));
+        memset(&global->locks, 0, sizeof(global->locks       ));
         
-        raw_serial_putchar ('?');
-        raw_serial_putchar ('\r');
-        raw_serial_putchar ('\n');
-        // Create some havoc... This would be disastrous if kernels used same ELF image.
-        memset (&boot_l1_high, 0, sizeof (boot_l1_high));
-        memset (&boot_l1_low, 0, sizeof (boot_l1_low));
-        cp15_invalidate_i_and_d_caches_fast();
-        cp15_invalidate_tlb();
-        printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
+        glbl_core_data->cmdline         = mb->cmdline                       ;
+        glbl_core_data->mods_addr       = mb->mods_addr                     ;
+        glbl_core_data->mods_count      = mb->mods_count                    ;        
+        glbl_core_data->mmap_addr       = mb->mmap_addr                     ;
+        glbl_core_data->mmap_length     = mb->mmap_length                   ;
+        glbl_core_data->multiboot_flags = mb->flags                         ;
+        glbl_core_data->start_free_ram  = ROUND_UP(max_addr, BASE_PAGE_SIZE);
 
-        while (true) ; // NOTE: Loop forever...
+        print_system_identification();
+        size_ram                   ();
+        set_leds                   (); 
+    } else {
+        glbl_core_data = (struct arm_core_data*)((lpaddr_t)&kernel_first_byte - BASE_PAGE_SIZE);
+        global         = (struct global       *)GLOBAL_VBASE                                   ;
 
-    	global = (struct global *)GLOBAL_VBASE;
-    	memset(&global->locks, 0, sizeof(global->locks));
+        glbl_core_data->cmdline = (lpaddr_t)&glbl_core_data->kernel_cmdline;
+        my_core_id              = glbl_core_data->dst_core_id              ;
 
-    	struct arm_core_data *core_data =
-            (struct arm_core_data*)((lvaddr_t)&kernel_first_byte
-                            - BASE_PAGE_SIZE);
-    	glbl_core_data = core_data;
-    	glbl_core_data->cmdline = (lpaddr_t)&core_data->kernel_cmdline;
-        glbl_core_data->multiboot_flags = 0; // clear mb flags
-    	glbl_core_data->start_free_ram = ROUND_UP(max(glbl_core_data->start_free_ram,
-                    (uintptr_t)&kernel_final_byte), BASE_PAGE_SIZE);
+        *((volatile lvaddr_t*)AUX_CORE_BOOT_0) = 2 << 2    ;
+        *((volatile lvaddr_t*)AP_WAIT_PHYS   ) = AP_STARTED;
+    }   
 
-    	my_core_id = core_data->dst_core_id;
-    	elf = &core_data->elf;
-        printk(LOG_NOTE, "|%s|\n", glbl_core_data->cmdline);
-    }
+    printk(LOG_NOTE, "Barrelfish OMAP44xx CPU driver starting at addr 0x%"PRIxLVADDR"\n", local_phys_to_mem((uint32_t)&kernel_first_byte));
 
-    // XXX: print kernel address for debugging with gdb
-    printk(LOG_NOTE, "Barrelfish OMAP44xx CPU driver starting at"
-            "addr 0x%"PRIxLVADDR"\n",
-	   local_phys_to_mem((uint32_t)&kernel_first_byte));
-
-    //start_another_core(); while(true); // works
-    print_system_identification();
-    size_ram();
-    set_leds();
-    printk(LOG_NOTE, "before paging_init\n");
-    paging_init();
-    printk(LOG_NOTE, "after paging_init\n");
+    paging_init    ();
     cp15_enable_mmu();
-    printk(LOG_NOTE, "MMU enabled\n");
-    text_init();
+    text_init      ();
 }
 
