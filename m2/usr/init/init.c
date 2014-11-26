@@ -807,7 +807,6 @@ int main(int argc, char *argv[])
         if (my_core_id == 0) {
             err = spawn_core(1);
             debug_printf ("spawn_core: %s\n", err_getstring (err));
-
             printf("Spawned!!!\n");
         }
 
@@ -822,7 +821,7 @@ int main(int argc, char *argv[])
     //while(true)
     //    printf("y\n");
 
-    debug_printf ("init returned.");
+    debug_printf ("init returned.\n");
     return EXIT_SUCCESS;
 
 }

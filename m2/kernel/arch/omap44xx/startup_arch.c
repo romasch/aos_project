@@ -76,7 +76,7 @@ struct global *global = (struct global *)GLOBAL_VBASE;
 
 /*
     Allocator for spawn_app_init
-*/
+*//*
 static lpaddr_t app_alloc_phys_start;
 static lpaddr_t app_alloc_phys_end  ;
 
@@ -92,7 +92,7 @@ static lpaddr_t app_alloc_phys(size_t size)
     }
 
     return addr;   
-}
+}//*/
 
 static inline uintptr_t round_up(uintptr_t value, size_t unit)
 {
