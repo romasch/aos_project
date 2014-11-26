@@ -30,6 +30,7 @@ struct global {
     } locks;
 
     uint32_t tickspersec;
+    struct multiboot_info* mb_info;
 
     genpaddr_t notify[MAX_COREID];
 };

@@ -477,15 +477,35 @@ void arch_init(void *pointer)
         print_system_identification();
         size_ram                   ();
         set_leds                   (); 
+
+        // Publish the mutliboot info to the second core.
+        global->mb_info = mb;
     } else {
         glbl_core_data = (struct arm_core_data*)((lpaddr_t)&kernel_first_byte - BASE_PAGE_SIZE);
         global         = (struct global       *)GLOBAL_VBASE                                   ;
 
-        glbl_core_data->cmdline = (lpaddr_t)&glbl_core_data->kernel_cmdline;
-        my_core_id              = glbl_core_data->dst_core_id              ;
+        // TODO: do we get any relevant data here, from init maybe??
+        memset(glbl_core_data, 0, sizeof(struct arm_core_data));
 
-        *((volatile lvaddr_t*)AUX_CORE_BOOT_0) = 2 << 2    ;
-        *((volatile lvaddr_t*)AP_WAIT_PHYS   ) = AP_STARTED;
+        glbl_core_data->cmdline = (lpaddr_t)&glbl_core_data->kernel_cmdline;
+//         my_core_id              = glbl_core_data->dst_core_id              ; // huh?
+        my_core_id = hal_get_cpu_id();
+
+
+        struct multiboot_info *mb = global -> mb_info;
+        glbl_core_data->mods_addr = mb->mods_addr;
+        glbl_core_data->mods_count = mb->mods_count;
+
+        //TODO: See what these are good for. They get used at some point, the values
+        // may be different for the APP core.
+        glbl_core_data->mmap_addr = mb->mmap_addr;
+        glbl_core_data->mmap_length = mb->mmap_length;
+
+
+        //TODO: This signal has to happen later, when APP is almost ready to boot.
+        *((volatile lvaddr_t*)AUX_CORE_BOOT_0) = AP_STARTED;
+
+        size_ram ();
     }   
 
     printk(LOG_NOTE, "Barrelfish OMAP44xx CPU driver starting at addr 0x%"PRIxLVADDR"\n", local_phys_to_mem((uint32_t)&kernel_first_byte));

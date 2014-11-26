@@ -598,6 +598,8 @@ static char *basename(const char *path)
 }
 
 // TODO: we really need last two parameters????
+// It's probably better to stack-allocate them in the enclosing function,
+// otherwise they're lost when this function returns.
 struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
         struct cte *rootcn, struct spawn_state *spawn_state)
 {
@@ -628,6 +630,7 @@ struct dcb *spawn_bsp_init(const char *name, alloc_phys_func alloc_phys_fn,
     struct startup_l2_info l2_info = { init_l2, INIT_VBASE };
 
     genvaddr_t init_ep, got_base = 0;
+
     load_init_image(&l2_info, name, &init_ep, &got_base);
 
     struct dispatcher_shared_arm *disp_arm
@@ -678,7 +681,12 @@ __attribute__((unused)) static void check_error (errval_t error)
     }
 }
 
-struct dcb* spawn_app_init(struct arm_core_data* core_data, const char* name)
+/*
+struct dcb* spawn_app_init(struct arm_core_data* core_data, const char* name,
+                           alloc_phys_func alloc_phys,
+                           struct cte *rootcn,
+                           struct spawn_state *spawn_state
+)
 {
     static struct cte init_rootcn;
 
@@ -687,7 +695,7 @@ struct dcb* spawn_app_init(struct arm_core_data* core_data, const char* name)
 
     char bootinfochar[16];
 
-    /* Construct cmdline args */
+    // Construct cmdline args
     snprintf(bootinfochar, sizeof(bootinfochar), "%u", INIT_BOOTINFO_VBASE);
 
     const char *argv[] = { basename(name), bootinfochar };
@@ -697,23 +705,29 @@ struct dcb* spawn_app_init(struct arm_core_data* core_data, const char* name)
     // TODO finish this part
 
     return init_dcb;
-}
+}*/
 
 void arm_kernel_startup(void)
 {
     struct dcb *init_dcb;
 
     printf("arm_kernel_startup entered \n");
-    
+
+
+
+    // TODO: Check if this splitting of memory is sufficient,
+    // or if we silently override some values.
+    // Also check if we can really use the same initialization for init.0 and init.1
+
+
     if(hal_cpu_is_bsp()) {
         static struct cte init_rootcn;
-
         struct spawn_state init_st;
 
         debug(SUBSYS_STARTUP, "Doing BSP related bootup \n");
 
         bsp_init_alloc_addr = glbl_core_data->start_free_ram;
-        bsp_init_alloc_end  = PHYS_MEMORY_START   + ram_size;
+        bsp_init_alloc_end  = PHYS_MEMORY_START   + ram_size / 2;
 
         memset(&init_st, 0, sizeof(struct spawn_state));
         
@@ -721,17 +735,16 @@ void arm_kernel_startup(void)
     } else {
         debug(SUBSYS_STARTUP, "Doing non-BSP related bootup \n");
 
-        app_alloc_phys_start =                                        glbl_core_data->memory_base_start ;
-        app_alloc_phys_end   = app_alloc_phys_start + ((lpaddr_t)1 << glbl_core_data->memory_bits      );
+        // NOTE: spawn_bsp_init uses bsp_alloc_phys_aligned, therefore we
+        // can't use the app_init_alloc_* variables.
+        bsp_init_alloc_addr = PHYS_MEMORY_START + ram_size/2;
+        bsp_init_alloc_end  = PHYS_MEMORY_START +  ram_size;
 
-        int core_id = hal_get_cpu_id();
-        printf ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX 0x%x\n", core_id);
-        if (!hal_cpu_is_bsp()) {
-            while (true) ; // NOTE: Loop forever...
-        }
+        static struct cte init_rootcn;
+        struct spawn_state init_st;
+        memset(&init_st, 0, sizeof(struct spawn_state));
 
-        //init_dcb = spawn_app_init(glbl_core_data, ADDTITIONAL_MODULE_NAME);
-        init_dcb = NULL;
+        init_dcb = spawn_bsp_init (BSP_INIT_MODULE_NAME, bsp_alloc_phys, &init_rootcn, &init_st);
 
         gic_ack_irq(gic_get_active_irq());
     }

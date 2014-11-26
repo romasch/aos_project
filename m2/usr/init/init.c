@@ -778,44 +778,49 @@ int main(int argc, char *argv[])
     led_init ();
     led_set_state (true);
 
+
+    // TODO: need special initialization for second init.
+    if (my_core_id == 0) {
     // Initialize the serial driver.
-    struct lmp_chan serial_chan;
-    if (err_is_ok (err)) {
-//         init_uart_driver ();
-        strcpy(ddb[2].name, "serial_driver");
-        err = spawn_with_channel ("serial_driver", 2, &(ddb[2].dispatcher_frame), &serial_chan);
-        debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
-        while (services [aos_service_serial] == NULL) {
-            event_dispatch (get_default_waitset());
+        struct lmp_chan serial_chan;
+        if (err_is_ok (err)) {
+    //         init_uart_driver ();
+            strcpy(ddb[2].name, "serial_driver");
+            err = spawn_with_channel ("serial_driver", 2, &(ddb[2].dispatcher_frame), &serial_chan);
+            debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
+            while (services [aos_service_serial] == NULL) {
+                event_dispatch (get_default_waitset());
+            }
+        }
+
+
+        if (err_is_fail (err)) {
+            debug_printf ("Failed to initialize: %s\n", err_getstring (err));
+        }
+        debug_printf_quiet ("initialized core services\n");
+
+        struct lmp_chan memeater_chan;
+        strcpy(ddb[1].name, "memeater");
+        spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
+
+
+        if (my_core_id == 0) {
+            err = spawn_core(1);
+            debug_printf ("spawn_core: %s\n", err_getstring (err));
+
+            printf("Spawned!!!\n");
+        }
+
+        // Go into messaging main loop.
+        while (true) {
+        err = event_dispatch (get_default_waitset());// TODO: error handling
+            if (err_is_fail (err)) {
+                debug_printf ("Handling LMP message: %s\n", err_getstring (err));
+            }
         }
     }
-
-
-    if (err_is_fail (err)) {
-        debug_printf ("Failed to initialize: %s\n", err_getstring (err));
-    }
-    debug_printf_quiet ("initialized core services\n");
-
-    struct lmp_chan memeater_chan;
-    strcpy(ddb[1].name, "memeater");
-    spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
-
-
-    assert (my_core_id == 0);
-    err = spawn_core(1);
-    debug_printf ("spawn_core: %s\n", err_getstring (err));
-
-    printf("Spawned!!!\n");
     //while(true)
     //    printf("y\n");
-
-    // Go into messaging main loop.
-    while (true) {
-        err = event_dispatch (get_default_waitset());// TODO: error handling
-        if (err_is_fail (err)) {
-            debug_printf ("Handling LMP message: %s\n", err_getstring (err));
-        }
-    }
 
     debug_printf ("init returned.");
     return EXIT_SUCCESS;
