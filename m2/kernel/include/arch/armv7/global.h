@@ -30,7 +30,14 @@ struct global {
     } locks;
 
     uint32_t tickspersec;
+
+    // Used to propagate mutliboot info to second kernel.
     struct multiboot_info* mb_info;
+
+    // Info to page used for communication.
+    uint32_t urpc_channel_physical_address;
+    uint8_t urpc_channel_size_bits;
+
 
     genpaddr_t notify[MAX_COREID];
 };

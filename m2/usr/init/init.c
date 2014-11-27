@@ -779,6 +779,24 @@ int main(int argc, char *argv[])
     led_set_state (true);
 
 
+    // Get the capability to the shared frame.
+    struct capref shared_frame = cap_initep;
+    shared_frame.slot = TASKCN_SLOT_MON_URPC;
+
+    // Map it.
+    void* shared_buffer = NULL;
+    err = paging_map_frame_attr (
+            get_current_paging_state(),
+            &shared_buffer,
+            BASE_PAGE_SIZE,
+            shared_frame,
+            VREGION_FLAGS_READ_WRITE_NOCACHE,
+            NULL,
+            NULL);
+
+    assert (err_is_ok (err));
+
+
     // TODO: need special initialization for second init.
     if (my_core_id == 0) {
     // Initialize the serial driver.
@@ -799,24 +817,42 @@ int main(int argc, char *argv[])
         }
         debug_printf_quiet ("initialized core services\n");
 
+
+
+        if (my_core_id == 0) {
+            // Zero out the shared memory.
+            memset (shared_buffer, 0, BASE_PAGE_SIZE);
+
+            volatile uint32_t* as_int_array = shared_buffer;
+            assert (as_int_array [0] == 0);
+
+            err = spawn_core(1);
+            debug_printf ("spawn_core: %s\n", err_getstring (err));
+
+            while (as_int_array [0] == 0) {
+                // Wait for a message from init.
+            }
+            debug_printf ("Got a test message from init.\n");
+
+        }
+
+        // Spawn the shell.
         struct lmp_chan memeater_chan;
         strcpy(ddb[1].name, "memeater");
         spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
 
-
-        if (my_core_id == 0) {
-            err = spawn_core(1);
-            debug_printf ("spawn_core: %s\n", err_getstring (err));
-            printf("Spawned!!!\n");
-        }
-
         // Go into messaging main loop.
         while (true) {
-        err = event_dispatch (get_default_waitset());// TODO: error handling
+            err = event_dispatch (get_default_waitset());
             if (err_is_fail (err)) {
                 debug_printf ("Handling LMP message: %s\n", err_getstring (err));
             }
         }
+    } else {
+        // We're init.1 and need to inform init.0 that we've spawned.
+        volatile uint32_t* as_int_array = shared_buffer;
+        as_int_array [0] = 1;
+
     }
     //while(true)
     //    printf("y\n");

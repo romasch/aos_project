@@ -719,19 +719,19 @@ void arm_kernel_startup(void)
     // or if we silently override some values.
     // Also check if we can really use the same initialization for init.0 and init.1
 
+    static struct cte init_rootcn;
+    struct spawn_state init_st;
+    memset(&init_st, 0, sizeof(struct spawn_state));
 
     if(hal_cpu_is_bsp()) {
-        static struct cte init_rootcn;
-        struct spawn_state init_st;
 
         debug(SUBSYS_STARTUP, "Doing BSP related bootup \n");
 
         bsp_init_alloc_addr = glbl_core_data->start_free_ram;
         bsp_init_alloc_end  = PHYS_MEMORY_START   + ram_size / 2;
-
-        memset(&init_st, 0, sizeof(struct spawn_state));
         
         init_dcb = spawn_bsp_init(BSP_INIT_MODULE_NAME, bsp_alloc_phys, &init_rootcn, &init_st);
+
     } else {
         debug(SUBSYS_STARTUP, "Doing non-BSP related bootup \n");
 
@@ -740,14 +740,26 @@ void arm_kernel_startup(void)
         bsp_init_alloc_addr = PHYS_MEMORY_START + ram_size/2;
         bsp_init_alloc_end  = PHYS_MEMORY_START +  ram_size;
 
-        static struct cte init_rootcn;
-        struct spawn_state init_st;
-        memset(&init_st, 0, sizeof(struct spawn_state));
-
         init_dcb = spawn_bsp_init (BSP_INIT_MODULE_NAME, bsp_alloc_phys, &init_rootcn, &init_st);
 
         gic_ack_irq(gic_get_active_irq());
     }
+
+    // Give init a frame cap to the shared buffer:
+
+    // Locate CNode and slot where to place the new frame cap.
+    // NOTE: There's a predefined slot in the Task CNode for this purpose.
+    struct cte* shared_frame_slot = caps_locate_slot (CNODE(init_st.taskcn), TASKCN_SLOT_MON_URPC);
+    assert (shared_frame_slot != NULL);
+
+    // Create the capability for the shared memory region.
+    errval_t err = caps_create_new (ObjType_Frame,
+                                    global -> urpc_channel_physical_address,
+                                    global -> urpc_channel_size_bits,
+                                    global -> urpc_channel_size_bits,
+                                    shared_frame_slot);
+    assert (err_is_ok (err));
+
 
     printk(
         LOG_NOTE                                                                    , 

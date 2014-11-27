@@ -472,7 +472,19 @@ void arch_init(void *pointer)
         glbl_core_data->mmap_addr       = mb->mmap_addr                     ;
         glbl_core_data->mmap_length     = mb->mmap_length                   ;
         glbl_core_data->multiboot_flags = mb->flags                         ;
-        glbl_core_data->start_free_ram  = ROUND_UP(max_addr, BASE_PAGE_SIZE);
+
+
+        // Allocate a free page-sized memory chunk for init to use.
+        uint32_t start_free_ram = ROUND_UP(max_addr, BASE_PAGE_SIZE);
+
+        global -> urpc_channel_physical_address = start_free_ram;
+        global -> urpc_channel_size_bits = BASE_PAGE_BITS;
+
+        assert ((1<<BASE_PAGE_BITS) == BASE_PAGE_SIZE);
+
+        // The allocated frame changes the region that can be used to map init and devices.
+        glbl_core_data->start_free_ram  = start_free_ram + BASE_PAGE_SIZE;
+
 
         print_system_identification();
         size_ram                   ();

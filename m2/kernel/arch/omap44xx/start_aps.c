@@ -86,8 +86,11 @@ int start_aps_arm_start(uint8_t core_id, lpaddr_t entry)
         // Send the interrrupt.
         send_event ();
 
-        // Wait a bit to avoid races.
-        // Later we may want for the other processor to set aux_core_boot_0 to AP_STARTED.
+        // Wait until the other processor tells us to continue.
+        while (*aux_core_boot_0 != AP_STARTED) {}
+
+        // TODO: prevents some ugly race conditions in serial driver.
+        // We need to check why the lock in global struct doesn't work yet.
         for (volatile int i = 0; i<40000000; i++);
 
     } else {
