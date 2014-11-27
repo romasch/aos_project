@@ -105,6 +105,33 @@ static void execute_external_command(char* const cmd)
     }
 }
 
+static void execute_remotely(char* command)
+{
+    coreid_t  core    ;
+    char    * core_str;
+
+    for (; (isdigit((int)*command) == false) && (*command != '\0'); command++);
+
+    core_str = command;
+
+    for (; (isdigit((int)*command) != false) && (*command != '\0'); command++);
+
+    *command = '\0';
+    command++;
+    
+    for (; (isalnum((int)*command) == false) && (*command != '-') && (*command != '_') && (*command != '\0'); command++);
+
+    core = atoi(core_str);
+    
+    if (core == 0) {
+        execute_external_command(command);
+    } else {
+        domainid_t newpid;
+
+        aos_rpc_process_spawn_remotely(pm_channel, command, core, &newpid);
+    }
+}
+
 /**
  * A simple shell that handles echo, run_memtest and exit commands.
  */
@@ -160,6 +187,8 @@ static void start_shell (void)
             error = aos_rpc_send_string (aos_rpc_get_init_channel (), "Very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long test string");
         } else if (starts_with ("ping", buf)) {
             test_routing_to_domain();
+        } else if (starts_with ("oncore", buf)) {
+            execute_remotely(buf);
         } else {
             execute_external_command(&buf[0]);
         }

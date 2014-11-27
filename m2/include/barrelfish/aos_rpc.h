@@ -268,6 +268,17 @@ enum aos_service {
  */
 #define AOS_RPC_WAIT_FOR_TERMINATION 17
 
+/**
+ * Spawn new domain from the requested binary on the remote core.
+ *
+ * Type: Synchronous
+ * Target: process manager (init)
+ * Send Args: process name
+ * Send Capability: -
+ * Receive Args: error value and pid of the created process.
+ * Receive Capability: -
+ */
+#define AOS_RPC_SPAWN_PROCESS_REMOTELY 18
 
 struct aos_rpc {
     struct lmp_chan channel;
@@ -324,8 +335,8 @@ errval_t aos_rpc_get_dev_cap(struct aos_rpc *chan, lpaddr_t paddr,
  * \arg name the name of the process that needs to be spawned (without a path prefix)
  * \arg newpid the process id of the newly spawned process
  */
-errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *newpid);
-
+errval_t aos_rpc_process_spawn         (struct aos_rpc *chan, char *name,                domainid_t *newpid);
+errval_t aos_rpc_process_spawn_remotely(struct aos_rpc *chan, char *name, coreid_t core, domainid_t *newpid);
 /**
  * \brief Get name of process with id pid.
  * \arg pid the process id to lookup

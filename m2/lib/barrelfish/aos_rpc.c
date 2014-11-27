@@ -362,6 +362,48 @@ errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *new
     return error;
 }
 
+errval_t aos_rpc_process_spawn_remotely(struct aos_rpc *chan, char *name, coreid_t core_id, domainid_t *newpid)
+{
+    // Lets assume that we have only two cores. 
+    // We ignore third parameter "core id" in pass request to the opposite core.
+    core_id = 0;
+
+    // Request a creation of new process from the binary packed into boot image.
+    errval_t error = -1; // Consider -1 as a sign of general error
+
+    if ((chan != NULL) && (name != NULL) && (newpid != NULL)) {
+        if (strlen(name) <= MAX_PROCESS_NAME_LENGTH) {
+            struct lmp_message_args  args   ;
+            struct lmp_chan        * channel = &chan->channel;
+
+            int indx = 0;
+    
+            init_lmp_message_args (&args, channel);
+
+            args.message.words [0] = AOS_RPC_SPAWN_PROCESS_REMOTELY;
+
+            str_to_args(&name[indx], &args.message.words[1], 8, &indx, false);
+            
+            // Do the IPC call.
+            error = aos_send_receive(&args, true);
+            print_error (error, "aos_rpc_process_spawn_remotely: communication failed. %s\n", err_getstring (error));
+
+            // Get the result.
+            if (err_is_ok (error)) {
+
+                error = args.message.words [0];
+                print_error (error, "aos_rpc_process_spawn_remotely: operation failed. %s\n", err_getstring (error));
+
+                if (err_is_ok (error)) {
+                    *newpid = args.message.words [1];
+                }
+            }
+        }
+    }
+
+    return error;
+}
+
 errval_t aos_rpc_process_get_name(struct aos_rpc *chan, domainid_t pid,
                                   char **name)
 {

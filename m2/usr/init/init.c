@@ -255,6 +255,121 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     return finished;
 }*/
 
+static const uintptr_t CHUNK_SIZE    = 64U                          ; // 2 cache lines
+static const uintptr_t IKC_LAST_WORD = 64U / sizeof(uintptr_t) -  1U; // index of last word in ikc message
+
+static void* shared_buffer = NULL;
+
+static uintptr_t ikc_read_ptr  = 0;
+static uintptr_t ikc_write_ptr = 0;
+
+static bool free_prev_message = false;
+
+static char* ikc_get_in_channel_base(void)
+{
+    char* channel_base;
+
+    if (my_core_id == 0) {
+        channel_base = (char*)(((uintptr_t)shared_buffer) + (BASE_PAGE_SIZE / 2));
+    } else {
+        channel_base = (char*)             shared_buffer                         ;
+    }
+
+    return channel_base;
+}
+
+static char* ikc_get_out_channel_base(void)
+{
+    char* channel_base;
+
+    if (my_core_id == 0) {
+        channel_base = (char*)             shared_buffer                         ;
+    } else {
+        channel_base = (char*)(((uintptr_t)shared_buffer) + (BASE_PAGE_SIZE / 2));
+    }
+
+    return channel_base;
+}
+
+static inline uintptr_t ikc_index_to_offset(const uintptr_t idx)
+{
+    return (idx % (BASE_PAGE_SIZE / (2 * CHUNK_SIZE))) * CHUNK_SIZE;
+}
+
+static void ikc_cleanup(char* channel_base)
+{
+    if (free_prev_message != false) {
+        ((uintptr_t*)&channel_base[ikc_index_to_offset(ikc_read_ptr - 1)])[IKC_LAST_WORD] = 0;        
+
+        free_prev_message = false;
+    }
+}
+
+static void* peek_ikc_message(void)
+{
+    char* channel_base = ikc_get_in_channel_base();
+    char* message_slot;
+
+    ikc_cleanup(channel_base);
+
+    message_slot = &channel_base[ikc_index_to_offset(ikc_read_ptr)];
+    if(((uintptr_t*)message_slot)[IKC_LAST_WORD] == 0) {
+        message_slot = NULL;
+    } else {
+        ikc_read_ptr++;
+    }
+    
+    return message_slot;
+}
+
+static void* pop_ikc_message(void)
+{
+    debug_printf ("pop_ikc_message +\n");
+    char* channel_base = ikc_get_in_channel_base();
+    char* message_slot;
+
+    ikc_cleanup(channel_base);
+
+    message_slot = &channel_base[ikc_index_to_offset(ikc_read_ptr)];
+
+    for (; ((volatile uintptr_t*)message_slot)[IKC_LAST_WORD] == 0 ;);
+    ikc_read_ptr++;
+    
+    debug_printf ("pop_ikc_message -\n");
+    return message_slot;
+}
+
+static void push_ikc_message(void* message, int size)
+{
+    debug_printf ("push_ikc_message +\n");
+    char* channel_base = ikc_get_out_channel_base();
+    char* message_slot;
+
+    assert(size <= CHUNK_SIZE - sizeof(uintptr_t));
+
+    message_slot = &channel_base[ikc_index_to_offset(ikc_write_ptr)];
+
+    for (; ((volatile uintptr_t*)message_slot)[IKC_LAST_WORD] != 0 ;);
+    memcpy(message_slot, message, size);
+    ((uintptr_t*)message_slot)[IKC_LAST_WORD] = 1;
+    ikc_write_ptr++;
+    debug_printf ("push_ikc_message -\n");
+}
+
+static void* ikc_rpc_call(void* message, int size)
+{
+    push_ikc_message(message, size);
+
+    return pop_ikc_message();
+}
+
+#define IKC_MSG_REMOTE_SPAWN 0x0FFFFFFFU
+
+struct remote_spawn_message {
+    uintptr_t message_id                              ;
+    char      name      [64U - 2U * sizeof(uintptr_t)];
+};
+
 /**
  * The main receive handler for init.
  */
@@ -379,6 +494,19 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             // Send reply back to the client
             lmp_chan_send2(lc, 0, NULL_CAP, err, idx);
+            break;
+        case AOS_RPC_SPAWN_PROCESS_REMOTELY:;
+            struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
+
+            name = (char*) &(msg.words [1]);
+            
+            strcpy(rsm.name, name);
+            
+            void* reply = ikc_rpc_call(&rsm, sizeof(rsm));
+
+            debug_printf ("AOS_RPC_SPAWN_PROCESS_REMOTELY\n");
+
+            lmp_chan_send1(lc, 0, NULL_CAP, *(errval_t*)reply);
             break;
         case AOS_RPC_GET_PROCESS_NAME:;
             domainid_t pid    = msg.words [1];
@@ -707,8 +835,6 @@ static errval_t spawn_core(coreid_t cid)
     core_data->memory_bits         = spawn_mem_frameid.bits        ;
     core_data->src_core_id         = my_core_id                    ;
     
-    printf("SpawneR: 0x%x | 0x%x | 0x%x\n", core_data->elf.size, core_data->elf.addr, core_data->elf.num);
-
     err = elf_load_and_relocate(cpu_blob.vaddr,
                                 cpu_blob.size,
                                 cpu_mem.buf + BASE_PAGE_SIZE,
@@ -717,6 +843,51 @@ static errval_t spawn_core(coreid_t cid)
     assert (err_is_ok (err));
 
     return sys_boot_core (cid, reloc_entry);
+}
+
+static struct thread* ikcsrv;
+
+static int ikc_server(void* data)
+{
+    errval_t  err    ;
+    void    * message;
+        
+    message = peek_ikc_message();
+    if (message == NULL) {
+        message = pop_ikc_message();
+    }
+
+    switch(*((uintptr_t*)message))
+    {
+       case IKC_MSG_REMOTE_SPAWN:;
+           err = SYS_ERR_OK;
+               
+           int   idx  = -1;
+           char* name = ((char*)message) + sizeof(uintptr_t);
+
+           for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
+               if (ddb[i].name[0] == '\0') {
+                   idx = i;
+               }
+           }
+
+           if (idx != -1) {
+               err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
+               if (err_is_ok(err)) {
+                   strcpy(ddb[idx].name, name);
+              }
+           }
+                    
+           push_ikc_message(&err, sizeof(err));
+           break;
+       default:;
+           uintptr_t reply = -1;
+              
+           push_ikc_message(&reply, sizeof(reply));
+           break;
+    }
+
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -784,7 +955,6 @@ int main(int argc, char *argv[])
     shared_frame.slot = TASKCN_SLOT_MON_URPC;
 
     // Map it.
-    void* shared_buffer = NULL;
     err = paging_map_frame_attr (
             get_current_paging_state(),
             &shared_buffer,
@@ -807,7 +977,7 @@ int main(int argc, char *argv[])
             err = spawn_with_channel ("serial_driver", 2, &(ddb[2].dispatcher_frame), &serial_chan);
             debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
             while (services [aos_service_serial] == NULL) {
-                event_dispatch (get_default_waitset());
+                event_dispatch (get_default_waitset()); 
             }
         }
 
@@ -829,35 +999,30 @@ int main(int argc, char *argv[])
             err = spawn_core(1);
             debug_printf ("spawn_core: %s\n", err_getstring (err));
 
-            while (as_int_array [0] == 0) {
-                // Wait for a message from init.
-            }
-            debug_printf ("Got a test message from init.\n");
-
+            /* struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
+            
+            strcpy(rsm.name, "hello_world");
+            ikc_rpc_call(&rsm, sizeof(rsm));
+            
+            debug_printf ("Got a test message from init.\n");*/
         }
 
         // Spawn the shell.
         struct lmp_chan memeater_chan;
         strcpy(ddb[1].name, "memeater");
         spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
-
-        // Go into messaging main loop.
-        while (true) {
-            err = event_dispatch (get_default_waitset());
-            if (err_is_fail (err)) {
-                debug_printf ("Handling LMP message: %s\n", err_getstring (err));
-            }
-        }
     } else {
-        // We're init.1 and need to inform init.0 that we've spawned.
-        volatile uint32_t* as_int_array = shared_buffer;
-        as_int_array [0] = 1;
-
+        ikcsrv = thread_create(ikc_server, NULL);
     }
-    //while(true)
-    //    printf("y\n");
+
+    // Go into messaging main loop.
+    while (true) {
+        err = event_dispatch (get_default_waitset());
+        if (err_is_fail (err)) {
+            debug_printf ("Handling LMP message: %s\n", err_getstring (err));
+        }
+    }
 
     debug_printf ("init returned.\n");
     return EXIT_SUCCESS;
-
 }
