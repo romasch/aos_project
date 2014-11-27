@@ -38,7 +38,6 @@ struct global {
     uint32_t urpc_channel_physical_address;
     uint8_t urpc_channel_size_bits;
 
-
     genpaddr_t notify[MAX_COREID];
 };
 

@@ -91,7 +91,7 @@ int start_aps_arm_start(uint8_t core_id, lpaddr_t entry)
 
         // TODO: prevents some ugly race conditions in serial driver.
         // We need to check why the lock in global struct doesn't work yet.
-        for (volatile int i = 0; i<40000000; i++);
+//         for (volatile int i = 0; i<40000000; i++);
 
     } else {
         error = SYS_ERR_CORE_NOT_FOUND;

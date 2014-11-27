@@ -845,46 +845,65 @@ static errval_t spawn_core(coreid_t cid)
     return sys_boot_core (cid, reloc_entry);
 }
 
+
+__attribute__((unused))
 static struct thread* ikcsrv;
 
+__attribute__((unused))
 static int ikc_server(void* data)
 {
-    errval_t  err    ;
-    void    * message;
-        
-    message = peek_ikc_message();
-    if (message == NULL) {
-        message = pop_ikc_message();
-    }
+    while (true) {
+        errval_t  err    ;
+        void    * message;
 
-    switch(*((uintptr_t*)message))
-    {
-       case IKC_MSG_REMOTE_SPAWN:;
-           err = SYS_ERR_OK;
-               
-           int   idx  = -1;
-           char* name = ((char*)message) + sizeof(uintptr_t);
+        message = peek_ikc_message();
+        if (message == NULL) {
+            message = pop_ikc_message();
+        }
 
-           for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
-               if (ddb[i].name[0] == '\0') {
-                   idx = i;
-               }
-           }
+        switch(*((uintptr_t*)message))
+        {
+        case IKC_MSG_REMOTE_SPAWN:;
+            err = SYS_ERR_OK;
 
-           if (idx != -1) {
-               err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
-               if (err_is_ok(err)) {
-                   strcpy(ddb[idx].name, name);
-              }
-           }
-                    
-           push_ikc_message(&err, sizeof(err));
-           break;
-       default:;
-           uintptr_t reply = -1;
-              
-           push_ikc_message(&reply, sizeof(reply));
-           break;
+            int   idx  = -1;
+            char* name = ((char*)message) + sizeof(uintptr_t);
+
+
+            for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
+                if (ddb[i].name[0] == '\0') {
+                    idx = i;
+                }
+            }
+
+            // Fix the name by removing whitespaces and newlines.
+            for (int i = 0; i < DDB_FIXED_LENGTH; i++) {
+                char c = name [i];
+                if (c == ' ' || c=='\n' || c == '\r') {
+                    name [i] = '\0';
+                }
+            }
+
+
+            for (volatile int wait=0; wait<1000000;wait++);
+            debug_printf (name);
+            for (volatile int wait=0; wait<1000000;wait++);
+
+
+            if (idx != -1) {
+                err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
+                if (err_is_ok(err)) {
+                    strcpy(ddb[idx].name, name);
+                }
+            }
+            push_ikc_message(&err, sizeof(err));
+            break;
+        default:;
+            uintptr_t reply = -1;
+
+            push_ikc_message(&reply, sizeof(reply));
+            break;
+        }
     }
 
     return 0;

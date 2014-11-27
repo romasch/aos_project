@@ -289,7 +289,7 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
 
     if(glbl_core_data->multiboot_flags & MULTIBOOT_INFO_FLAG_HAS_MMAP) {
         struct arm_coredata_mmap* mmap = (struct arm_coredata_mmap*)local_phys_to_mem(glbl_core_data->mmap_addr);
-        
+
         paging_arm_reset(mmap->base_addr, mmap->length);
     } else {
         paging_arm_reset(PHYS_MEMORY_START, 0x40000000);
@@ -369,6 +369,7 @@ static void  __attribute__ ((noinline,noreturn)) text_init(void)
         start_aps_remap(aux_core_boot_section);
     }
 
+        cp15_disable_cache(); // TODO: Find a less drastic way to make spinlocks work.
     arm_kernel_startup();
 }
 
@@ -503,7 +504,6 @@ void arch_init(void *pointer)
 //         my_core_id              = glbl_core_data->dst_core_id              ; // huh?
         my_core_id = hal_get_cpu_id();
 
-
         struct multiboot_info *mb = global -> mb_info;
         glbl_core_data->mods_addr = mb->mods_addr;
         glbl_core_data->mods_count = mb->mods_count;
@@ -518,7 +518,7 @@ void arch_init(void *pointer)
         *((volatile lvaddr_t*)AUX_CORE_BOOT_0) = AP_STARTED;
 
         size_ram ();
-    }   
+    }
 
     printk(LOG_NOTE, "Barrelfish OMAP44xx CPU driver starting at addr 0x%"PRIxLVADDR"\n", local_phys_to_mem((uint32_t)&kernel_first_byte));
 
