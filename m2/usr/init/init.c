@@ -766,6 +766,7 @@ static errval_t spawn_memory_prepare(size_t size, struct capref *cap_ret, struct
     return SYS_ERR_OK;
 }
 
+__attribute__((unused))
 static errval_t spawn_core(coreid_t cid)
 {
     errval_t err = SYS_ERR_OK;
@@ -1015,7 +1016,7 @@ int main(int argc, char *argv[])
             volatile uint32_t* as_int_array = shared_buffer;
             assert (as_int_array [0] == 0);
 
-            err = spawn_core(1);
+            //err = spawn_core(1);
             debug_printf ("spawn_core: %s\n", err_getstring (err));
 
             /* struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };

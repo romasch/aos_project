@@ -25,7 +25,7 @@ static void get_cap(lpaddr_t base, size_t size)
     size_t len;
 
     struct capref cap;
-    err = aos_rpc_get_dev_cap(get_init_rpc(),
+    err = aos_rpc_get_dev_cap(aos_rpc_get_init_channel(),
             base, size, &cap, &len);
 
     if (err_is_fail(err)) {
@@ -104,6 +104,8 @@ int main(int argc, char **argv)
             printf("\n");
         }
     }
+
+    test_fs (buffer);
 
     return 0;
 }

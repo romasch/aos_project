@@ -22,4 +22,7 @@ void mmchs_init(void);
 errval_t mmchs_read_block(size_t block_nr, void *buffer);
 errval_t mmchs_write_block(size_t block_nr, void *buffer);
 
+// Filesystem tests.
+void test_fs (void* buffer);
+
 #endif // MMCHS2_H
