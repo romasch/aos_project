@@ -1,7 +1,14 @@
 #include "mmchs.h"
 
+#include <barrelfish/aos_rpc.h>
 #include <string.h>
+#include <ctype.h>
 
+#define VERBOSE
+
+#include <barrelfish/aos_dbg.h>
+
+#define DIRECTORY_ENTRIES 16
 
 // Offsets to values in root cluster.
 // NOTE: ARM requires 4-byte aligned addresses.
@@ -42,10 +49,174 @@ static uint32_t fat32_sectors_per_cluster;
 
 static uint32_t root_directory_cluster;
 
-static uint32_t cluster_to_sector_number (uint32_t cluster_number)
+static uint32_t cluster_to_sector_number (uint32_t cluster_index)
 {
-    return fat32_cluster_start + (cluster_number-2) * fat32_sectors_per_cluster;
+    return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
 }
+
+errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
+errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
+{
+    uint32_t path_index = 0;
+    errval_t error = SYS_ERR_OK;
+    bool end_of_path = false;
+
+    while (!end_of_path) {
+        uint32_t fat_name_index = 0;
+        char fat_name [12];
+
+        bool end_of_name = false;
+        while (!end_of_name) {
+            switch (path [path_index]) {
+                case '\0':
+                    end_of_path = true;
+                    // Fallthrough intended!
+                case '/':
+                    while (fat_name_index < 11) {
+                        fat_name [fat_name_index] = ' ';
+                        fat_name_index++;
+                    }
+                    end_of_name = true;
+                    break;
+                case '.':
+                    while (fat_name_index < 8) {
+                        fat_name [fat_name_index] = ' ';
+                        fat_name_index++;
+                    }
+                    break;
+                default:
+                    if (fat_name_index < 11) {
+                        fat_name [fat_name_index] = (char) toupper ((int) path [path_index]);
+                        fat_name_index++;
+                    }
+            }
+            path_index++;
+        }
+        fat_name [11] = '\0';
+
+        if (fat_name [0] != ' ') {
+            debug_printf_quiet ("FAT name: ---%s---\n", fat_name);
+
+            //TODO: Follow paths here.
+
+        }
+    }
+    return error;
+}
+
+
+errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count);
+errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count)
+{
+    // TODO: Paths other than root.
+    uint32_t cluster_index = root_directory_cluster;
+    fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", 0, 0);
+
+    errval_t error = SYS_ERR_OK;
+
+    uint32_t capacity = 1;
+    uint32_t count = 0;
+    struct aos_dirent** result;
+    result = malloc (capacity * sizeof (struct aos_dirent*));
+
+     while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
+        char sector [512];
+        error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+
+        if (err_is_ok (error)) {
+
+            for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES; entry_index++) {
+
+                uint32_t base_offset = entry_index * 32;
+
+                uint8_t first_byte = get_char (sector, base_offset);
+                uint8_t attributes = get_char (sector, base_offset + 0x0b);
+
+                // The cluster index is split among two 16 bit fields.
+                uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
+                uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
+                uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
+                cluster_index_entry = cluster_index_entry; // Avoid compiler warning.
+
+                // Check what kind of directory entry it is.
+                if (first_byte == 0xe5) {
+                    debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
+                }
+                else if (first_byte == 0x0) {
+                    debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
+                }
+                // Long file name from VFAT extension.
+                else if ( (attributes & 0xF) == 0xF) {
+                    debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
+                }
+                // This is a file or directory. Finally, something to do.
+                else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
+
+                    // Add more space if necessary.
+                    if (count == capacity) {
+                        capacity = capacity * 2;
+                        struct aos_dirent** new_result = realloc (result, capacity * sizeof (struct aos_dirent*));
+                        if (new_result) {
+                            result = new_result;
+                        } else {
+                            error = LIB_ERR_MALLOC_FAIL;
+                        }
+                    }
+
+                    // Create the new entry.
+                    struct aos_dirent* new_entry = malloc (sizeof (struct aos_dirent));
+
+                    if (new_entry) {
+
+                        // FAT without extensions has 8.3 naming scheme.
+                        // This means we only need to copy 11 characters.
+                        strncpy (&(new_entry->name[0]), sector + base_offset, 11);
+                        new_entry->name [11] = '\0';
+
+                        if (attributes & 0x10) {
+                            // Set size to zero for directories.
+                            new_entry -> size = 0;
+                            debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", entry_index, attributes, &new_entry->name, cluster_index_entry);
+                        } else {
+                            // Get the file size.
+                            uint32_t file_size = get_int (sector, base_offset + 0x1c);
+                            new_entry -> size = file_size;
+                            debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, &new_entry->name, cluster_index_entry, file_size);
+                        }
+
+                        result [count] = new_entry;
+                        ++count;
+                    } else {
+                        error = LIB_ERR_MALLOC_FAIL;
+                    }
+                }
+                else {
+                    printf ("Entry: %u, Unknown type.\n");
+                }
+
+            }
+        }
+
+        // TODO: get next cluster index from File Allocation Table.
+        cluster_index = 0xFFFFFFFF;
+
+    }
+
+
+
+    if (err_is_fail (error) || entry_list == NULL || entry_count == NULL) {
+        for (int i=0; i<count; i++) {
+            free (result[i]);
+        }
+        free (result);
+    } else {
+        *entry_list = *result;
+        *entry_count = count;
+    }
+
+    return error;
+}
+
 
 
 void test_fs (void* buffer)
@@ -74,6 +245,11 @@ void test_fs (void* buffer)
 
     root_directory_cluster = get_int (buffer, root_dir_cluster_offset);
     debug_printf ("Root cluster: %u, sector %u\n", root_directory_cluster, cluster_to_sector_number (root_directory_cluster));
+
+
+    fat32_read_directory (0,0,0);
+    debug_printf ("Finished test\n");
+
 
     void *root_cluster = malloc(512);
     assert(root_cluster != NULL);
