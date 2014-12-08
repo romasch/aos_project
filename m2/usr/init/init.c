@@ -1001,6 +1001,17 @@ int main(int argc, char *argv[])
             }
         }
 
+        struct lmp_chan filesystem_chan;
+        if (err_is_ok (err)) {
+            strcpy(ddb[3].name, "mmchs");
+            err = spawn_with_channel ("mmchs", 3, &(ddb[3].dispatcher_frame), &filesystem_chan);
+            debug_printf ("Spawning filesystem driver: %s\n", err_getstring (err));
+            while (services [aos_service_filesystem] == NULL) {
+                event_dispatch (get_default_waitset());
+            }
+        }
+
+
 
         if (err_is_fail (err)) {
             debug_printf ("Failed to initialize: %s\n", err_getstring (err));

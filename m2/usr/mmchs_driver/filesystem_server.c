@@ -1,6 +1,6 @@
 #include "mmchs.h"
-#include "fat32.h"
 
+#include <aos_support/fat32.h>
 #include <aos_support/server.h>
 #include <barrelfish/aos_dbg.h>
 
@@ -21,8 +21,8 @@ errval_t start_filesystem_server (void)
     error = fat32_init (mmchs_read_block);
 
     if (err_is_ok (error)) {
-        test_fs ();
-        //error = start_server (aos_service_filesystem, my_handler);
+        test_fs (); // TODO remove when not needed any more.
+        error = start_server (aos_service_filesystem, my_handler);
     }
     return error;
 }

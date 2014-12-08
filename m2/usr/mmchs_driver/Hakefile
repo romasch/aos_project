@@ -15,7 +15,7 @@
                         cFiles = [
                             "main.c", "cm2.c", "ctrlmod.c",
                             "i2c.c", "mmchs.c", "twl6030.c",
-                            "fat32.c", "filesystem_server.c"
+                            "filesystem_server.c"
                         ],
                         mackerelDevices = [
                             "ti_i2c",

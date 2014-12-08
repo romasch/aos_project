@@ -7,5 +7,5 @@
 -- 
 --------------------------------------------------------------------------
 
-[ build library { target = "aos_support", cFiles = [ "server.c" ] } ]
+[ build library { target = "aos_support", cFiles = [ "server.c", "fat32.c" ] } ]
 

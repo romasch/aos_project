@@ -10,6 +10,8 @@
 static struct aos_rpc* serial_channel;
 static struct aos_rpc* pm_channel;
 static struct aos_rpc* led_channel;
+static struct aos_rpc* filesystem_channel;
+
 
 static bool starts_with(const char *prefix, const char *str)
 {
@@ -207,6 +209,16 @@ int main(int argc, char *argv[])
     serial_channel = aos_rpc_get_serial_driver_channel ();
 
     aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
+
+    errval_t error;
+    filesystem_channel = malloc (sizeof (struct aos_rpc));
+    if (filesystem_channel) {
+        struct capref fs_cap;
+        error = aos_find_service (aos_service_filesystem, &fs_cap);
+        error = aos_rpc_init (filesystem_channel, fs_cap);
+        error = aos_ping (filesystem_channel, 42);
+    }
+
 
 //     aos_ping (aos_rpc_get_init_channel (), 46);
 //     aos_ping (aos_rpc_get_init_channel (), 42);

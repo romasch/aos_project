@@ -1,4 +1,4 @@
-#include "fat32.h"
+#include <aos_support/fat32.h>
 
 #include <barrelfish/aos_rpc.h>
 #include <string.h>
