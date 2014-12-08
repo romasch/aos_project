@@ -174,7 +174,80 @@ errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
     return error;
 }
 
+static uint32_t descriptor_to_size [1024];
+static uint32_t descriptor_to_cluster [1024];
+static uint32_t descriptor_count = 0;
 
+errval_t fat32_open_file (char* path, uint32_t* file_descriptor);
+errval_t fat32_open_file (char* path, uint32_t* file_descriptor)
+{
+    assert (path != NULL && file_descriptor != NULL);
+    assert (descriptor_count < 1024); // TODO: A dynamic structure.
+
+    uint32_t ret_cluster = 0;
+    uint32_t ret_size = 0;
+    errval_t error = SYS_ERR_OK;
+
+    error = fat32_find_node (path, &ret_cluster, &ret_size);
+
+    if (err_is_ok (error)) {
+        descriptor_to_cluster [descriptor_count] = ret_cluster;
+        descriptor_to_size [descriptor_count] = ret_size;
+        *file_descriptor = descriptor_count;
+        descriptor_count++;
+    }
+    return error;
+}
+
+errval_t fat32_close_file (uint32_t file_descriptor);
+errval_t fat32_close_file (uint32_t file_descriptor)
+{
+    // TODO: Recycle file descriptors.
+    descriptor_to_cluster [file_descriptor] = 0;
+    descriptor_to_size [file_descriptor] = 0;
+    return SYS_ERR_OK;
+}
+
+static inline int min (int first, int second)
+{
+    if (first < second) {
+        return first;
+    } else {
+        return second;
+    }
+}
+errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen);
+errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen)
+{
+    // TODO Support reads which are bigger than a sector.
+    assert (position + size < 512);
+
+    uint32_t cluster_index = descriptor_to_cluster [file_descriptor];
+    uint32_t file_size = descriptor_to_size [file_descriptor];
+
+    // TODO: More graceful way of handling closed files.
+    assert (cluster_index != 0 && file_size != 0);
+
+    errval_t error = SYS_ERR_OK;
+
+    int8_t sector [512];
+    error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+
+    if (err_is_ok (error)) {
+        uint32_t buffer_size = min (file_size - position, size);
+        int8_t* buffer = malloc (buffer_size+1); // TODO: errors
+
+        for (int i=0; i<buffer_size; i++) {
+            buffer [i] = sector [i + position];
+        }
+        // TODO: Do we actually need to null-terminate the buffer?
+        buffer [buffer_size] = '\0';
+
+        *buf = buffer;
+        *buflen = buffer_size;
+    }
+    return error;
+}
 
 
 errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count);
@@ -306,6 +379,9 @@ void test_fs (void* buffer)
     assert (get_short (buffer, signature_offset) == 0xaa55);
 
 
+
+
+
     fat32_sectors_per_cluster = get_char (buffer, sectors_per_cluster_offset);
     assert (fat32_sectors_per_cluster == 8);
 
@@ -324,6 +400,14 @@ void test_fs (void* buffer)
     root_directory_cluster = get_int (buffer, root_dir_cluster_offset);
     debug_printf ("Root cluster: %u, sector %u\n", root_directory_cluster, cluster_to_sector_number (root_directory_cluster));
 
+
+    uint32_t fd = 0;
+    fat32_open_file ("/asdf/a.txt", &fd);
+    void* buf;
+    size_t buflen;
+    fat32_read_file (fd, 0, 100, &buf, &buflen);
+    debug_printf ("Size of read file: %u\n", buflen);
+    debug_printf ("File: %s\n", buf);
 
     fat32_read_directory (0,0,0);
     debug_printf ("Finished test\n");
