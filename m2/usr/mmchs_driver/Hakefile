@@ -15,7 +15,7 @@
                         cFiles = [
                             "main.c", "cm2.c", "ctrlmod.c",
                             "i2c.c", "mmchs.c", "twl6030.c",
-                            "fat32.c"
+                            "fat32.c", "filesystem_server.c"
                         ],
                         mackerelDevices = [
                             "ti_i2c",
@@ -27,7 +27,7 @@
                             "omap/omap44xx_l4per_cm2"
                         ],
 
-                        addLibraries = [ "driverkit" ],
+                        addLibraries = [ "driverkit", "aos_support" ],
                         architectures = ["armv7"]
     }
 ]

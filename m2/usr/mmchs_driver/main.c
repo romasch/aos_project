@@ -105,7 +105,7 @@ int main(int argc, char **argv)
         }
     }
 
-    test_fs (buffer);
+    test_fs ();
 
     return 0;
 }

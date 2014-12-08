@@ -1,4 +1,5 @@
 #include "mmchs.h"
+#include "fat32.h"
 
 #include <barrelfish/aos_rpc.h>
 #include <string.h>
@@ -9,6 +10,9 @@
 #include <barrelfish/aos_dbg.h>
 
 #define DIRECTORY_ENTRIES 16
+
+//The function to read a sector.
+static sector_read_function_t fat32_driver_read_sector;
 
 // Offsets to values in root cluster.
 // NOTE: ARM requires 4-byte aligned addresses.
@@ -54,8 +58,8 @@ static uint32_t cluster_to_sector_number (uint32_t cluster_index)
     return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
 }
 
-errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
-errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
+// errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
+static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
     uint32_t path_index = 0;
     errval_t error = SYS_ERR_OK;
@@ -105,7 +109,7 @@ errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
             while (cluster_index != 0xFFFFFFFF && err_is_ok (error) && !found_entry) {
 
                 char sector [512];
-                error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+                error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
 
                 if (err_is_ok (error)) {
                     for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && !found_entry; entry_index++) {
@@ -178,7 +182,6 @@ static uint32_t descriptor_to_size [1024];
 static uint32_t descriptor_to_cluster [1024];
 static uint32_t descriptor_count = 0;
 
-errval_t fat32_open_file (char* path, uint32_t* file_descriptor);
 errval_t fat32_open_file (char* path, uint32_t* file_descriptor)
 {
     assert (path != NULL && file_descriptor != NULL);
@@ -199,7 +202,6 @@ errval_t fat32_open_file (char* path, uint32_t* file_descriptor)
     return error;
 }
 
-errval_t fat32_close_file (uint32_t file_descriptor);
 errval_t fat32_close_file (uint32_t file_descriptor)
 {
     // TODO: Recycle file descriptors.
@@ -216,7 +218,7 @@ static inline int min (int first, int second)
         return second;
     }
 }
-errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen);
+
 errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen)
 {
     // TODO Support reads which are bigger than a sector.
@@ -231,7 +233,7 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
     errval_t error = SYS_ERR_OK;
 
     int8_t sector [512];
-    error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+    error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
 
     if (err_is_ok (error)) {
         uint32_t buffer_size = min (file_size - position, size);
@@ -250,7 +252,6 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 }
 
 
-errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count);
 errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count)
 {
     // TODO: Paths other than root.
@@ -272,7 +273,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
      while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
         char sector [512];
-        error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+        error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
 
         if (err_is_ok (error)) {
 
@@ -369,37 +370,60 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 }
 
 
-
-void test_fs (void* buffer)
+errval_t fat32_init (sector_read_function_t read_function)
 {
+    assert (read_function != NULL);
+    errval_t error = SYS_ERR_OK;
+    fat32_driver_read_sector = read_function;
 
-//     assert (get_short (buffer, bytes_per_sector_offset) == 512);
+    // Read the first block from sector.
+    // NOTE: When using partition tables we'll have to change this constant.
+    uint8_t* volume_id_sector [512];
+    error = fat32_driver_read_sector (0, volume_id_sector);
 
-    // Check signature
-    assert (get_short (buffer, signature_offset) == 0xaa55);
+    if (err_is_ok (error)) {
+
+        // Check signature
+        assert (get_short (volume_id_sector, signature_offset) == 0xaa55);
+
+        // Read the amount of sectors per cluster.
+        // Should be 8 according to the formatting command.
+        fat32_sectors_per_cluster = get_char (volume_id_sector, sectors_per_cluster_offset);
+        assert (fat32_sectors_per_cluster == 8);
+
+        // Read the amound of reserved sectors.
+        uint32_t reserved_sector_count = get_short (volume_id_sector, reserved_sectors_count_offset);
+        if (reserved_sector_count != 0x20) {
+            // The code should work for reserved sectors other than 0x20, but we never tested this.
+            debug_printf ("Warning! Reserved sector count in FAT filesystem is 0x%X\n", reserved_sector_count);
+        }
+
+        // Now we can get the sector index of the first File Allocation Table.
+        fat32_fat_start = fat32_volumeid_block + reserved_sector_count;
+
+        // Read out the size and number of FAT tables.
+        // NOTE: The size of a FAT depends on the disk size.
+        uint32_t sectors_per_fat = get_int (volume_id_sector, sectors_per_fat_offset);
+        uint8_t fat_count = get_char (volume_id_sector, fat_count_offset);
+        assert (fat_count == 2);
+
+        // Now we can get the sector index of the first cluster in the file system.
+        fat32_cluster_start = fat32_fat_start + (fat_count * sectors_per_fat);
+
+        // Read the first cluster number of the root directory.
+        root_directory_cluster = get_int (volume_id_sector, root_dir_cluster_offset);
+        if (root_directory_cluster != 2) {
+            // The code should work for a root directory cluster other than two, but we never tested this.
+            debug_printf ("Warning! Root directory cluster number in FAT filesystem is %u\n", root_directory_cluster);
+        }
+    }
+    return error;
+}
 
 
-
-
-
-    fat32_sectors_per_cluster = get_char (buffer, sectors_per_cluster_offset);
-    assert (fat32_sectors_per_cluster == 8);
-
-    uint32_t reserved_sector_count = get_short (buffer, reserved_sectors_count_offset);
-    assert (reserved_sector_count == 0x20);
-
-    fat32_fat_start = fat32_volumeid_block + reserved_sector_count;
-
-    uint8_t fat_count = get_char (buffer, fat_count_offset);
-    assert (fat_count == 2);
-
-    uint32_t sectors_per_fat = get_int (buffer, sectors_per_fat_offset); // depends on disk size.
-
-    fat32_cluster_start = fat32_fat_start + (fat_count * sectors_per_fat);
-
-    root_directory_cluster = get_int (buffer, root_dir_cluster_offset);
-    debug_printf ("Root cluster: %u, sector %u\n", root_directory_cluster, cluster_to_sector_number (root_directory_cluster));
-
+void test_fs (void)
+{
+    fat32_init(mmchs_read_block);
 
     uint32_t fd = 0;
     fat32_open_file ("/asdf/a.txt", &fd);
@@ -416,7 +440,7 @@ void test_fs (void* buffer)
     void *root_cluster = malloc(512);
     assert(root_cluster != NULL);
 
-    errval_t err = mmchs_read_block(cluster_to_sector_number (root_directory_cluster), root_cluster);
+    errval_t err = fat32_driver_read_sector(cluster_to_sector_number (root_directory_cluster), root_cluster);
     assert(err_is_ok(err));
     printf("Read block %d:\n", 0);
     for (int i = 1; i <= 512; ++i)
@@ -464,7 +488,7 @@ void test_fs (void* buffer)
                 printf ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", base/32, attrib, filename, cluster_entry, file_size);
 
                 char filebuf [512];
-                err = mmchs_read_block(cluster_to_sector_number (cluster_entry), filebuf);
+                err = fat32_driver_read_sector(cluster_to_sector_number (cluster_entry), filebuf);
                 assert (err_is_ok (err));
                 printf ("File contents:\n");
                 printf ("%s\n",filebuf);
