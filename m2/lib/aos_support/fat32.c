@@ -44,7 +44,7 @@ static inline uint32_t get_int (void* buffer, uint32_t offset)
 }
 
 
-static uint32_t fat32_volumeid_block = 0; // In the future this value may change when we support partitions.
+static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
 static uint32_t fat32_fat_start;
 
 static uint32_t fat32_cluster_start;
@@ -389,8 +389,9 @@ errval_t fat32_init (sector_read_function_t read_function)
 
     // Read the first block from sector.
     // NOTE: When using partition tables we'll have to change this constant.
+    fat32_volumeid_block = 0;
     uint8_t* volume_id_sector [512];
-    error = fat32_driver_read_sector (0, volume_id_sector);
+    error = fat32_driver_read_sector (fat32_volumeid_block, volume_id_sector);
 
     if (err_is_ok (error)) {
 
