@@ -1,12 +1,11 @@
-#include "mmchs.h"
 #include "fat32.h"
 
 #include <barrelfish/aos_rpc.h>
 #include <string.h>
+#include <stdio.h>
 #include <ctype.h>
 
 #define VERBOSE
-
 #include <barrelfish/aos_dbg.h>
 
 #define DIRECTORY_ENTRIES 16
@@ -257,11 +256,16 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     // TODO: Paths other than root.
     uint32_t cluster_index = root_directory_cluster;
     uint32_t ret_cluster, ret_size;
-    fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", &ret_cluster, &ret_size);
 
-    fat32_find_node ("/asdf", &ret_cluster, &ret_size);
-    debug_printf ("Testdir cluster: %u\n", ret_cluster);
+
+    //fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", &ret_cluster, &ret_size);
+
+//     debug_printf ("Testdir cluster: %u\n", ret_cluster);
+    fat32_find_node (path, &ret_cluster, &ret_size);
     cluster_index = ret_cluster;
+
+    // Check that it's a directory.
+    assert (ret_size == 0); // TODO: graceful error recovery.
 
 
     errval_t error = SYS_ERR_OK;
@@ -334,6 +338,13 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                             uint32_t file_size = get_int (sector, base_offset + 0x1c);
                             new_entry -> size = file_size;
                             debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, &new_entry->name, cluster_index_entry, file_size);
+
+                            // Uncomment to print file content:
+//                             char filebuf [512];
+//                             errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
+//                             assert (err_is_ok (inner_error));
+//                             debug_printf ("File contents:\n%s\n", filebuf);
+
                         }
 
                         result [count] = new_entry;
@@ -343,7 +354,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     }
                 }
                 else {
-                    printf ("Entry: %u, Unknown type.\n");
+                    debug_printf_quiet ("Entry: %u, Unknown type.\n");
                 }
 
             }
@@ -423,78 +434,43 @@ errval_t fat32_init (sector_read_function_t read_function)
 
 void test_fs (void)
 {
-    fat32_init(mmchs_read_block);
+    /////// Read the first block
+
+    void *root_cluster = malloc(512);
+    assert(root_cluster != NULL);
+    errval_t err = fat32_driver_read_sector(cluster_to_sector_number (root_directory_cluster), root_cluster);
+    assert(err_is_ok(err));
+#ifdef VERBOSE
+    debug_printf_quiet ("Read block %d:\n", 0);
+    for (int i = 1; i <= 512; ++i)
+    {
+        printf ("%"PRIu8"\t", ((uint8_t*) root_cluster)[i-1]);
+        if (i % 4 == 0) {
+            printf("\n");
+        }
+    }
+#endif
+
+    /////// Read the file at path /asdf/a.txt
 
     uint32_t fd = 0;
     fat32_open_file ("/asdf/a.txt", &fd);
     void* buf;
     size_t buflen;
     fat32_read_file (fd, 0, 100, &buf, &buflen);
-    debug_printf ("Size of read file: %u\n", buflen);
-    debug_printf ("File: %s\n", buf);
+    debug_printf_quiet ("Size of read file: %u\n", buflen);
+    debug_printf_quiet ("File: %s\n", buf);
 
-    fat32_read_directory (0,0,0);
-    debug_printf ("Finished test\n");
+    /////// Read some directories.
 
+    debug_printf_quiet ("Reading directory: / \n\n");
+    fat32_read_directory ("/",0,0);
 
-    void *root_cluster = malloc(512);
-    assert(root_cluster != NULL);
+    debug_printf_quiet ("Reading directory: /testdir \n\n");
+    fat32_read_directory ("/testdir/", 0, 0);
 
-    errval_t err = fat32_driver_read_sector(cluster_to_sector_number (root_directory_cluster), root_cluster);
-    assert(err_is_ok(err));
-    printf("Read block %d:\n", 0);
-    for (int i = 1; i <= 512; ++i)
-    {
-        printf("%"PRIu8"\t", ((uint8_t*) root_cluster)[i-1]);
-        if (i % 4 == 0) {
-            printf("\n");
-        }
-    }
+    debug_printf_quiet ("Reading directory: /asdf \n\n");
+    fat32_read_directory ("/asdf", 0, 0);
 
-
-    // Read the directory entries of the root cluster.
-    for (uint32_t base = 0; base < 512; base += 32) {
-
-
-        uint8_t first_byte = get_char (root_cluster, base);
-
-        uint8_t attrib = get_char (root_cluster, base + 0x0b);
-
-
-        if (first_byte == 0xe5) { // Deleted file
-            printf ("Entry: %u, Deleted.\n", base/32);
-        }
-        else if (first_byte == 0x0) {
-           printf ("Entry: %u, Null entry.\n", base/32);
-        }
-        else if ( (attrib & 0xF) == 0xF) { // Long file name.
-           printf ("Entry: %u, Long filename. Attrib: %u\n", base/32, attrib);
-        }
-        else {
-            char filename[12];
-            strncpy (&filename[0], root_cluster + base, 11);
-            filename [11] = '\0';
-
-
-            uint32_t cluster_high = get_short (root_cluster, base + 0x14);
-            uint16_t cluster_low = get_short (root_cluster, base + 0x1a);
-
-            uint32_t cluster_entry = (cluster_high << 16) | cluster_low;
-
-            if (attrib & 0x10) { // Subdirectory
-                printf ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", base/32, attrib, filename, cluster_entry);
-            } else if ((attrib & 0x20) || (attrib == 0)) { // Normal file
-                uint32_t file_size = get_int (root_cluster, base + 0x1c);
-                printf ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", base/32, attrib, filename, cluster_entry, file_size);
-
-                char filebuf [512];
-                err = fat32_driver_read_sector(cluster_to_sector_number (cluster_entry), filebuf);
-                assert (err_is_ok (err));
-                printf ("File contents:\n");
-                printf ("%s\n",filebuf);
-            } else {
-                printf ("Entry: %u, Unknown type.\n");
-            }
-        }
-    }
+    debug_printf_quiet ("Finished tests\n");
 }

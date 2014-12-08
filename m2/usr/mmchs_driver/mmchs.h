@@ -23,6 +23,6 @@ errval_t mmchs_read_block(size_t block_nr, void *buffer);
 errval_t mmchs_write_block(size_t block_nr, void *buffer);
 
 // Filesystem tests.
-void test_fs (void);
+errval_t start_filesystem_server (void);
 
 #endif // MMCHS2_H

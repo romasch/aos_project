@@ -25,6 +25,7 @@ enum aos_service {
     aos_service_led,
 	aos_service_init,
 	aos_service_domain,
+    aos_service_filesystem,
     //...
 
     aos_service_test,

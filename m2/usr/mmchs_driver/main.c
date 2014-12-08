@@ -91,21 +91,20 @@ int main(int argc, char **argv)
     // dd when reading the first block on linux...
     //
 
-    void *buffer = malloc(512);
-    assert(buffer != NULL);
-
-    err = mmchs_read_block(0, buffer);
-    assert(err_is_ok(err));
-    printf("Read block %d:\n", 0);
-    for (int i = 1; i <= 512; ++i)
-    {
-        printf("%"PRIu8"\t", ((uint8_t*) buffer)[i-1]);
-        if (i % 4 == 0) {
-            printf("\n");
-        }
-    }
-
-    test_fs ();
+//     void *buffer = malloc(512);
+//     assert(buffer != NULL);
+//
+//     err = mmchs_read_block(0, buffer);
+//     assert(err_is_ok(err));
+//     printf("Read block %d:\n", 0);
+//     for (int i = 1; i <= 512; ++i)
+//     {
+//         printf("%"PRIu8"\t", ((uint8_t*) buffer)[i-1]);
+//         if (i % 4 == 0) {
+//             printf("\n");
+//         }
+//     }
+    start_filesystem_server();
 
     return 0;
 }
