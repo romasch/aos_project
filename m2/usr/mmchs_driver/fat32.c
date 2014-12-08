@@ -61,7 +61,10 @@ errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
     errval_t error = SYS_ERR_OK;
     bool end_of_path = false;
 
-    while (!end_of_path) {
+    uint32_t cluster_index = root_directory_cluster;
+    uint32_t file_size = 0;
+
+    while (!end_of_path && err_is_ok (error)) {
         uint32_t fat_name_index = 0;
         char fat_name [12];
 
@@ -95,14 +98,83 @@ errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
         fat_name [11] = '\0';
 
         if (fat_name [0] != ' ') {
+
             debug_printf_quiet ("FAT name: ---%s---\n", fat_name);
+            bool found_entry = false;
+
+            while (cluster_index != 0xFFFFFFFF && err_is_ok (error) && !found_entry) {
+
+                char sector [512];
+                error = mmchs_read_block (cluster_to_sector_number (cluster_index), sector);
+
+                if (err_is_ok (error)) {
+                    for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && !found_entry; entry_index++) {
+                        uint32_t base_offset = entry_index * 32;
+
+                        uint8_t first_byte = get_char (sector, base_offset);
+                        uint8_t attributes = get_char (sector, base_offset + 0x0b);
+
+                        // The cluster index is split among two 16 bit fields.
+                        uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
+                        uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
+                        uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
+
+                        // Check what kind of directory entry it is.
+                        if (first_byte == 0xe5) {
+                            debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
+                        }
+                        else if (first_byte == 0x0) {
+                            debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
+                        }
+                        // Long file name from VFAT extension.
+                        else if ( (attributes & 0xF) == 0xF) {
+                            debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
+                        }
+                        // This is a file or directory. Finally, something to do.
+                        else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
+
+                            // FAT without extensions has 8.3 naming scheme.
+                            // This means we only need to copy 11 characters.
+                            if (strncmp (fat_name, sector+base_offset, 11) == 0) {
+                                cluster_index = cluster_index_entry;
+                                found_entry = true;
+                            }
+                            if ((attributes & 0x20) || (attributes == 0)) {
+                                file_size = get_int (sector, base_offset + 0x1c);
+                            } else {
+                                file_size = 0;
+                            }
+                        } else {
+                            debug_printf ("Unknown entry\n");
+                        }
+                    }
+                }
+                if (!found_entry) {
+                    //TODO: look up FAT table.
+                    cluster_index = 0xFFFFFFFF;
+                }
+            }
+
+            if (!found_entry && cluster_index == 0xFFFFFFFF) {
+                debug_printf ("Not found!\n");
+                error = LIB_ERR_MALLOC_FAIL; //TODO: Find a suitable error for file not found.
+            }
 
             //TODO: Follow paths here.
 
         }
     }
+    if (err_is_ok (error)) {
+        *ret_cluster = cluster_index;
+        *ret_size = file_size;
+    } else {
+        *ret_cluster = 0;
+        *ret_size = 0;
+    }
     return error;
 }
+
+
 
 
 errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count);
@@ -110,7 +182,13 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 {
     // TODO: Paths other than root.
     uint32_t cluster_index = root_directory_cluster;
-    fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", 0, 0);
+    uint32_t ret_cluster, ret_size;
+    fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", &ret_cluster, &ret_size);
+
+    fat32_find_node ("/asdf", &ret_cluster, &ret_size);
+    debug_printf ("Testdir cluster: %u\n", ret_cluster);
+    cluster_index = ret_cluster;
+
 
     errval_t error = SYS_ERR_OK;
 
