@@ -64,11 +64,4 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 /// Some test features.
 void test_fs (void);
 
-inline uint32_t get_int (void* buffer, uint32_t offset);
-
-inline uint32_t get_int (void* buffer, uint32_t offset)
-{
-    return (uint32_t)(((char*)buffer) + offset);
-}
-
 #endif

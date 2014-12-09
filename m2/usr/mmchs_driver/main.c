@@ -84,7 +84,6 @@ int main(int argc, char **argv)
 
     mmchs_init();
 
-
     //
     // Reading the first block from the SD-Card
     // This should be the same information you get with
@@ -104,6 +103,7 @@ int main(int argc, char **argv)
 //             printf("\n");
 //         }
 //     }
+
     start_filesystem_server();
 
     return 0;

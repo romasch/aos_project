@@ -129,21 +129,36 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
     }
 }
 
-static uint32_t parse_mbr(sector_read_function_t read_function)
+static inline uint16_t get_short (void* buffer, uint32_t offset)
 {
-    errval_t  error                ;
-    uint32_t  starting_lba          = UINT_MAX;
-    uint8_t * volume_id_sector[512];
+    // We can't handle offsets spanning two words yet.
+    assert ((offset & 1) == 0);
+    return ((uint16_t*) buffer) [offset >> 1];
+}
 
-    error = read_function(MBR_SECTOR_IDX, volume_id_sector);
+static uint32_t parse_master_boot_record (sector_read_function_t read_function)
+{
+    errval_t error = SYS_ERR_OK;
+    uint32_t partition_start_sector = 0;
+    uint8_t * master_boot_record [512];
+
+    error = read_function(MBR_SECTOR_IDX, master_boot_record);
     if (err_is_ok(error)) {
-        starting_lba = get_int (volume_id_sector, 0x1C6U); // TODO: Now we assume the classical removable devices partitioning where we have 
-                                                           // only one partition covering entire storage space.
+        // TODO: We assume a partition table with only the first partition occupied by a FAT filesystem.
+
+        // Offset to first partition table entry is 0x1be.
+        // NOTE: The reading has to be split in two, because the integer is not byte aligned.
+        // NOTE: Partition table is little-endian, so the LSB are at lower positions.
+        uint32_t partition_start_sector_low = get_short (master_boot_record, 0x1be + 0x8);
+        uint32_t partition_start_sector_high = get_short (master_boot_record, 0x1be + 0xa);
+
+        partition_start_sector = (partition_start_sector_high << 16) | partition_start_sector_low;
     } else {
         debug_printf ("Warning! NULL-sector can't be read\n");
     }
+    debug_printf_quiet ("partition_start_sector: %u\n", partition_start_sector);
 
-    return starting_lba;
+    return partition_start_sector;
 }
 
 errval_t start_filesystem_server (void)
@@ -152,7 +167,9 @@ errval_t start_filesystem_server (void)
 
     memset(dir_table, 0, sizeof(dir_table));
 
-    error = fat32_init (mmchs_read_block, parse_mbr(mmchs_read_block));
+    error = fat32_init (mmchs_read_block, parse_master_boot_record (mmchs_read_block));
+
+    debug_printf ("FAT initialized\n");
 
     if (err_is_ok (error)) {
         test_fs (); // TODO remove when not needed any more.

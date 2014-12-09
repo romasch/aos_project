@@ -36,6 +36,13 @@ static inline uint16_t get_short (void* buffer, uint32_t offset)
     return ((uint16_t*) buffer) [offset >> 1];
 }
 
+static inline uint32_t get_int (void* buffer, uint32_t offset)
+{
+    // We can't handle offsets spanning two words yet.
+    assert ((offset & 3) == 0);
+    return ((uint32_t*) buffer) [offset >> 2];
+}
+
 static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
 static uint32_t fat32_fat_start;
 
@@ -125,6 +132,9 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
                         else if ( (attributes & 0xF) == 0xF) {
                             debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
                         }
+                        else if (attributes & 0x8) {
+                            debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
+                        }
                         // This is a file or directory. Finally, something to do.
                         else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
 
@@ -140,7 +150,7 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
                                 file_size = 0;
                             }
                         } else {
-                            debug_printf ("Unknown entry\n");
+                            debug_printf_quiet ("Unknown entry. Attributes %u\n", attributes);
                         }
                     }
                 }
@@ -297,6 +307,9 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                 else if ( (attributes & 0xF) == 0xF) {
                     debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
                 }
+                else if (attributes & 0x8) {
+                    debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
+                }
                 // This is a file or directory. Finally, something to do.
                 else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
 
@@ -346,7 +359,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     }
                 }
                 else {
-                    debug_printf_quiet ("Entry: %u, Unknown type.\n");
+                    debug_printf_quiet ("Entry: %u, Unknown type. Attributes %u\n", attributes);
                 }
 
             }
@@ -447,7 +460,7 @@ void test_fs (void)
     /////// Read the file at path /asdf/a.txt
 
     uint32_t fd = 0;
-    fat32_open_file ("/asdf/a.txt", &fd);
+    fat32_open_file ("/testdir/hello.txt", &fd);
     void* buf;
     size_t buflen;
     fat32_read_file (fd, 0, 100, &buf, &buflen);
