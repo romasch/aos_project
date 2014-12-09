@@ -447,7 +447,7 @@ void test_fs (void)
     errval_t err = fat32_driver_read_sector(cluster_to_sector_number (root_directory_cluster), root_cluster);
     assert(err_is_ok(err));
 #ifdef VERBOSE
-    debug_printf_quiet ("Read block %d:\n", 0);
+    debug_printf_quiet ("Read block %d:\n", cluster_to_sector_number (root_directory_cluster));
     for (int i = 1; i <= 512; ++i)
     {
         printf ("%"PRIu8"\t", ((uint8_t*) root_cluster)[i-1]);
