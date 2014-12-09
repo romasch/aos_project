@@ -57,8 +57,7 @@ static void uart_putchar(char c)
     *uart_thr = c;
 }
 
-static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message,
-                           struct capref capability, uint32_t message_type)
+static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, struct capref capability, uint32_t message_type)
 {
     switch (message_type) {
         case AOS_RPC_SERIAL_PUTCHAR:;

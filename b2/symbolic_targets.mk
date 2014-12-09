@@ -460,7 +460,9 @@ PANDABOARD_MODULES=             \
     armv7/sbin/memeater         \
     armv7/sbin/test_domain      \
     armv7/sbin/serial_driver    \
-    armv7/sbin/hello_world      
+    armv7/sbin/hello_world      \
+    armv7/sbin/mmchs            \
+
 
 menu.lst.pandaboard: $(SRCDIR)/hake/menu.lst.pandaboard
 	cp $< $@
@@ -511,13 +513,13 @@ menu.lst.arm_gem5_mc: $(SRCDIR)/hake/menu.lst.arm_gem5_mc
 
 GEM5_MODULES=\
 	armv7/sbin/cpu_arm_gem5 \
-	armv7/sbin/init \
-	armv7/sbin/mem_serv \
-	armv7/sbin/monitor \
-	armv7/sbin/ramfsd \
-	armv7/sbin/spawnd \
-	armv7/sbin/startd \
-	armv7/sbin/skb \
+	armv7/sbin/init         \
+	armv7/sbin/mem_serv     \
+	armv7/sbin/monitor      \
+	armv7/sbin/ramfsd       \
+	armv7/sbin/spawnd       \
+	armv7/sbin/startd       \
+	armv7/sbin/skb          \
 	armv7/sbin/memtest
 
 

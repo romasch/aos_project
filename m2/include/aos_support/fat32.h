@@ -15,7 +15,7 @@ typedef errval_t (*sector_read_function_t) (size_t sector_index, void* buffer);
  *
  * \param read_function: The function to read a block.
  */
-errval_t fat32_init (sector_read_function_t read_function);
+errval_t fat32_init (sector_read_function_t read_function, uint32_t fat32_pbb);
 
 /**
  * Open the specified file.
@@ -63,5 +63,12 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
 /// Some test features.
 void test_fs (void);
+
+inline uint32_t get_int (void* buffer, uint32_t offset);
+
+inline uint32_t get_int (void* buffer, uint32_t offset)
+{
+    return (uint32_t)(((char*)buffer) + offset);
+}
 
 #endif

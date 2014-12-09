@@ -36,14 +36,6 @@ static inline uint16_t get_short (void* buffer, uint32_t offset)
     return ((uint16_t*) buffer) [offset >> 1];
 }
 
-static inline uint32_t get_int (void* buffer, uint32_t offset)
-{
-    // We can't handle offsets spanning two words yet.
-    assert ((offset & 3) == 0);
-    return ((uint32_t*) buffer) [offset >> 2];
-}
-
-
 static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
 static uint32_t fat32_fat_start;
 
@@ -381,7 +373,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 }
 
 
-errval_t fat32_init (sector_read_function_t read_function)
+errval_t fat32_init (sector_read_function_t read_function, uint32_t fat32_pbb)
 {
     assert (read_function != NULL);
     errval_t error = SYS_ERR_OK;
@@ -389,7 +381,7 @@ errval_t fat32_init (sector_read_function_t read_function)
 
     // Read the first block from sector.
     // NOTE: When using partition tables we'll have to change this constant.
-    fat32_volumeid_block = 0;
+    fat32_volumeid_block = fat32_pbb;
     uint8_t* volume_id_sector [512];
     error = fat32_driver_read_sector (fat32_volumeid_block, volume_id_sector);
 

@@ -484,30 +484,189 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan,
     return error;
 }
 
+#define MAX_PATH 7 * 4 - 1
+
 errval_t aos_rpc_open(struct aos_rpc *chan, char *path, int *fd)
 {
-    // TODO (milestone 7): implement file open
-    return SYS_ERR_OK;
+    // Open file from the removable storage
+
+    errval_t error = -1;
+
+    if ((chan != NULL) && (path != NULL) && (fd != NULL)) {
+        if (strlen(path) <= MAX_PATH) {
+            struct lmp_message_args  args   ;
+            struct lmp_chan        * channel = &chan->channel;
+    
+            init_lmp_message_args(&args, channel);
+
+            args.message.words[0] = AOS_RPC_OPEN_FILE   ;
+            args.message.words[1] = disp_get_domain_id();
+
+            strcpy((char*)(&args.message.words[2]), path);
+
+            error = aos_send_receive (&args, false);
+            print_error (error, "aos_rpc_open: communication failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                error = args.message.words[0];
+                print_error (error, "aos_rpc_open: operation failed. %s\n", err_getstring (error));
+
+                if (err_is_ok (error)) {
+                    *fd = args.message.words[1];
+                }
+            }
+        } else {
+            print_error(-1, "aos_rpc_open: too long path (%s). \n", path);
+        }
+    } else {
+        print_error(-1, "aos_rpc_open: invalid argument. \n");
+    }
+
+    return error;
 }
 
-errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path,
-                         struct aos_dirent **dir, size_t *elem_count)
+errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **dir, size_t *elem_count)
 {
-    // TODO (milestone 7): implement readdir
-    return SYS_ERR_OK;
+    // Read list of files from the directory
+
+    errval_t error = -1;
+
+    if ((chan != NULL) && (path != NULL) && (dir != NULL) && (elem_count != NULL)) {
+        if (strlen(path) <= MAX_PATH) {
+            struct lmp_message_args  args   ;
+            struct lmp_chan        * channel = &chan->channel;
+    
+            init_lmp_message_args(&args, channel);
+
+            args.message.words[0] = AOS_RPC_READ_DIR    ;
+            args.message.words[1] = disp_get_domain_id();
+            
+            strcpy((char*)(&args.message.words[2]), path);
+
+            error = aos_send_receive (&args, false);
+            print_error (error, "aos_rpc_readdir: communication failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                error = args.message.words [0];
+                print_error (error, "aos_rpc_readdir: operation failed. %s\n", err_getstring (error));
+
+                if (err_is_ok (error)) {
+                    struct aos_dirent* buffer;
+
+                    uint32_t fd     = args.message.words[1];
+                    uint32_t length = args.message.words[2];
+                       
+                    buffer = malloc(sizeof(struct aos_dirent) * length);
+
+                    for (uint32_t i = 0; (i < length) && err_is_ok (error); i++)
+                    {
+                        args.message.words[0] = AOS_RPC_READ_DIRX   ;
+                        args.message.words[1] = disp_get_domain_id();
+                        args.message.words[2] = fd                  ;
+                        args.message.words[3] = i                   ;
+                        
+                        error = aos_send_receive (&args, false);
+                        print_error (error, "aos_rpc_readdir: communication failed. %s\n", err_getstring (error));
+
+                        if (err_is_ok (error)) {
+                            error = args.message.words [0];
+                            print_error (error, "aos_rpc_readdir: operation failed. %s\n", err_getstring (error));
+
+                            if (err_is_ok (error)) {
+                                buffer[i].type = args.message.words[1];
+                                
+                                strcpy(buffer[i].name, (char*)(&args.message.words[2]));
+                            }
+                        }
+                    }
+                    
+                    if (err_is_ok (error)) {
+                        *dir        = buffer;
+                        *elem_count = length;
+                    } else {
+                        *dir        = NULL;
+                        *elem_count = 0   ;
+                        
+                        free(buffer);
+                    }
+
+                    aos_rpc_close(chan, fd);
+                }
+            }
+        }
+    }
+
+    return error;
 }
 
-errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size,
-                      void** buf, size_t *buflen)
+errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size, void** buf, size_t *buflen)
 {
-    // TODO (milestone 7): implement file read
-    return SYS_ERR_OK;
+    // Read previously opened file
+
+    errval_t error = -1;
+
+    if ((chan != NULL) && (buf != NULL) && (buflen != NULL)) {
+        if (size <= MAX_PATH) {
+            struct lmp_message_args  args   ;
+            struct lmp_chan        * channel = &chan->channel;
+    
+            init_lmp_message_args(&args, channel);
+
+            args.message.words [0] = AOS_RPC_READ_FILE   ;
+            args.message.words [1] = disp_get_domain_id();
+    
+            args.message.words [2] = fd      ;
+            args.message.words [3] = position;
+            args.message.words [4] = size    ;
+
+            error = aos_send_receive (&args, false);
+            print_error (error, "aos_rpc_read: communication failed. %s\n", err_getstring (error));
+
+            if (err_is_ok (error)) {
+                error = args.message.words [0];
+                print_error (error, "aos_rpc_read: operation failed. %s\n", err_getstring (error));
+
+                if (err_is_ok (error)) {
+                    *buflen = args.message.words[1];
+                    *buf    = malloc(size)         ;
+
+                    memcpy(*buf, &args.message.words[2], *buflen);
+                }
+            }
+        }
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_close(struct aos_rpc *chan, int fd)
 {
-    // TODO (milestone 7): implement file close
-    return SYS_ERR_OK;
+    // Close previously opened file
+
+    errval_t error = -1;
+
+    if (chan != NULL) {
+        struct lmp_message_args  args   ;
+        struct lmp_chan        * channel = &chan->channel;
+
+        init_lmp_message_args(&args, channel);
+
+        // Set up the send arguments.
+        args.message.words [0] = AOS_RPC_CLOSE_FILE  ;
+        args.message.words [1] = disp_get_domain_id();
+
+        args.message.words [2] = fd;
+
+        error = aos_send_receive (&args, false);
+        print_error (error, "aos_rpc_close: communication failed. %s\n", err_getstring (error));
+
+        if (err_is_ok (error)) {
+            error = args.message.words [0];
+            print_error (error, "aos_rpc_close: operation failed. %s\n", err_getstring (error));
+        }
+    }
+
+    return error;
 }
 
 errval_t aos_rpc_write(struct aos_rpc *chan, int fd, size_t position, size_t *size,
@@ -799,3 +958,4 @@ errval_t aos_connection_init (struct lmp_chan* channel)
     }
     return error;
 }
+

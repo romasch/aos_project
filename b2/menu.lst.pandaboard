@@ -14,6 +14,7 @@ module  /armv7/sbin/memeater
 module  /armv7/sbin/test_domain
 module  /armv7/sbin/serial_driver
 module  /armv7/sbin/hello_world
+module  /armv7/sbin/mmchs
 
 # For pandaboard, use following values.
 mmap map 0x80000000 0x40000000 1

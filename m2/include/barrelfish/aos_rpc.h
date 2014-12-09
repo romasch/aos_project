@@ -281,6 +281,66 @@ enum aos_service {
  */
 #define AOS_RPC_SPAWN_PROCESS_REMOTELY 18
 
+/**
+ * Open file on the removable storage.
+ *
+ * Type: Synchronous
+ * Target: filesystem driver
+ * Send Args: path to file
+ * Send Capability: -
+ * Receive Args: error value and file handle.
+ * Receive Capability: -
+ */
+#define AOS_RPC_OPEN_FILE 19
+
+/**
+ * Get list of files in directory (directories itself are files too)
+ *
+ * Type: Synchronous
+ * Target: filesystem driver
+ * Send Args: path to directory
+ * Send Capability: -
+ * Receive Args: error value and handle of directory and number of files contained in directory.
+ * Receive Capability: -
+ */
+#define AOS_RPC_READ_DIR 20
+
+/**
+ * Get name of file in directory (directories itself are files too)
+ *
+ * Type: Synchronous
+ * Target: filesystem driver
+ * Send Args: directory handle and index of file inside
+ * Send Capability: -
+ * Receive Args: error value and name and type of file contained in directory.
+ * Receive Capability: -
+ */
+#define AOS_RPC_READ_DIRX 21
+
+/**
+ * Read data from opened file.
+ *
+ * Type: Synchronous
+ * Target: filesystem driver
+ * Send Args: handle for opened file, offset, size
+ * Send Capability: -
+ * Receive Args: error value and data chunk.
+ * Receive Capability: -
+ */
+#define AOS_RPC_READ_FILE 22
+
+/**
+ * Close previously opened file.
+ *
+ * Type: Synchronous
+ * Target: filesystem driver
+ * Send Args: file handle
+ * Send Capability: -
+ * Receive Args: error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_CLOSE_FILE 23
+
 struct aos_rpc {
     struct lmp_chan channel;
     // TODO: add state for your implementation
@@ -369,13 +429,14 @@ errval_t aos_rpc_process_get_all_pids(struct aos_rpc *chan, domainid_t **pids, s
  */
 errval_t aos_rpc_open(struct aos_rpc *chan, char *path, int *fd);
 
-#define MAXNAMELEN 255
+#define MAXNAMELEN (7 * 4)
 struct aos_dirent {
     /// name of the directory entry
     char name[MAXNAMELEN];
     /// size of the item referenced
     size_t size;
     /// Optional: add more information about a directory entry here
+    char   type;
 };
 
 /**
@@ -386,8 +447,7 @@ struct aos_dirent {
  * responsibility.
  * \arg elem_count the size of `dir' in elements
  */
-errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path,
-                         struct aos_dirent **dir, size_t *elem_count);
+errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **dir, size_t *elem_count);
 
 /**
  * \brief read from an open file
@@ -399,8 +459,7 @@ errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path,
  * responsibility.
  * \arg buflen the amount of bytes read and stored in `buf'
  */
-errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size,
-                      void** buf, size_t *buflen);
+errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size, void** buf, size_t *buflen);
 
 /**
  * \brief close an open file
