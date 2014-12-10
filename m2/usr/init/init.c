@@ -36,6 +36,7 @@
 
 #include <aos_support/server.h>
 #include <barrelfish/aos_dbg.h>
+#include <aos_support/shared_buffer.h>
 
 #define BINARY_PREFIX "armv7/sbin/"
 
@@ -56,11 +57,6 @@ static struct ddb_entry ddb[DDB_FIXED_LENGTH];
 
 struct bootinfo *bi;
 static coreid_t my_core_id;
-
-// Storage for incoming strings.
-static uint32_t example_index;
-static char*    example_str  ;
-static uint32_t example_size ;
 
 // static struct capref service_uart;
 
@@ -97,10 +93,6 @@ static void init_data_structures (void)
         services [i] = NULL;
     }
     memset (&module_map, 0, sizeof (module_map));
-
-    example_index =          0 ;
-    example_size  =        128 ;
-    example_str   = malloc(128);
 }
 
 static void recv_handler (void *arg);
@@ -395,31 +387,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             //TODO: do we need to destroy ram capability here?
 //          error = cap_destroy (ram);
 
-            //DBG: Uncomment if you really need it ==> debug_printf ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
-            break;
-
-        case AOS_RPC_SEND_STRING:;
-            // TODO: maybe store the string somewhere else?
-
-            // Enlarge receive buffer if necessary.
-            uint32_t char_count = (LMP_MSG_LENGTH - 1) * sizeof (uint32_t);
-
-            if (example_index + char_count + 1 >= example_size) {
-                example_str = realloc(example_str, example_size * 2);
-                memset(&example_str[example_size], 0, example_size);
-                example_size *= 2;
-            }
-
-            memcpy(&example_str[example_index], &msg.words[1], char_count);
-            example_index += char_count;
-
-            // Append a null character to safely print the string.
-            example_str [example_index] = '\0';
-            // debug_printf ("Handled AOS_RPC_SEND_STRING with string: %s\n", example_str + example_index - char_count);
-            if (example_str [example_index - 1] == '\0') {
-                debug_printf ("Received last chunk. Contents: \n");
-                printf("%s\n", example_str);
-            }
+            debug_printf_quiet ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
             break;
         case AOS_ROUTE_REGISTER_SERVICE:;
             debug_printf_quiet ("Got AOS_ROUTE_REGISTER_SERVICE 0x%x\n", msg.words [1]);

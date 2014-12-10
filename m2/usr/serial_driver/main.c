@@ -5,6 +5,8 @@
 #include <barrelfish/aos_dbg.h>
 #include <barrelfish/aos_rpc.h>
 #include <aos_support/server.h>
+#include <aos_support/shared_buffer.h>
+#include <stdio.h>
 
 // From Milestone 0...
 #define UART_BASE 0x48020000
@@ -59,6 +61,8 @@ static void uart_putchar(char c)
 
 static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, struct capref capability, uint32_t message_type)
 {
+    errval_t error = SYS_ERR_OK;
+
     switch (message_type) {
         case AOS_RPC_SERIAL_PUTCHAR:;
             char output_character = message -> words [1];
@@ -70,8 +74,22 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                 lmp_chan_send2 (channel, 0, NULL_CAP, SYS_ERR_OK, input_character);
             } else {
                 // TODO: let it wait!
-                lmp_chan_send2 (channel, 0, NULL_CAP, -1, 0);
+                // TODO: Proper error value.
+                error = -1;
+                lmp_chan_send2 (channel, 0, NULL_CAP, error, 0);
             }
+            break;
+        case AOS_RPC_SEND_STRING:;
+            uint32_t memory_descriptor = message -> words [1];
+            void* buffer;
+            error = get_shared_buffer (memory_descriptor, &buffer, NULL);
+            if (err_is_ok (error)) {
+                debug_printf_quiet ("Received a string:\n");
+                printf ("%s", (char*) buffer);
+                fflush (stdout);
+                debug_printf_quiet ("\nEnd of string:\n");
+            }
+            lmp_chan_send1 (channel, 0, NULL_CAP, error);
             break;
         case AOS_RPC_SET_FOREGROUND:;
             foreground_domain = message -> words [1];

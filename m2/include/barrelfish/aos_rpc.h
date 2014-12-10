@@ -114,7 +114,7 @@ enum aos_service {
  * Get a RAM capability.
  *
  * Type: Synchronous
- * Target: private endpoint of RAM server
+ * Target: RAM service
  * Send Args: Requested size in bits
  * Send Capability: -
  * Receive Args: error value, actual size in bits
@@ -123,13 +123,13 @@ enum aos_service {
 #define AOS_RPC_GET_RAM_CAP 5
 
 /**
- * Send a (partial) string.
+ * Send a string using a shared buffer.
  *
- * Type: Synchronous // TODO: might be a candidate for asynchronous communication.
- * Target: any
- * Send Args: Each remaining arg filled with characters.
+ * Type: Synchronous
+ * Target: Serial driver
+ * Send Args: Memory descriptor of shared buffer.
  * Send Capability: -
- * Receive Args: no reply
+ * Receive Args: Error value
  * Receive Capability: -
  */
 #define AOS_RPC_SEND_STRING 6
@@ -366,8 +366,12 @@ enum aos_service {
 #define AOS_RPC_UNREGISTER_MEMORY 25
 
 struct aos_rpc {
+    uint32_t memory_descriptor;
+    void* shared_buffer;
+    uint32_t shared_buffer_length;
     struct lmp_chan channel;
     // TODO: add state for your implementation
+
 };
 
 /// The global init channel.
@@ -564,11 +568,6 @@ void aos_rpc_exit (struct aos_rpc* rpc);
  * \brief Block until domain terminates.
  */
 errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain);
-
-/**
- * \brief Set up a shared frame.
- */
-errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t* memory_descriptor, void** buffer);
 
 /**
  * Ping a domain.

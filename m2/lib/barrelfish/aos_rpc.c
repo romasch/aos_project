@@ -19,6 +19,8 @@
 
 #include <barrelfish/aos_dbg.h>
 
+#define SHARED_BUFFER_DEFAULT_SIZE_BITS 20
+
 static inline void print_error (errval_t error, char* fmt, ...)
 {
     if (err_is_fail (error)) {
@@ -34,6 +36,8 @@ static inline void print_error (errval_t error, char* fmt, ...)
 // NOTE: We can't use malloc here, because the initial ram allocator
 // only allows frames of one page size, and our paging code doesn't allow this.
 static struct aos_rpc init_channel;
+
+static errval_t aos_rpc_setup_shared_buffer (struct aos_rpc* rpc, uint8_t size_bits);
 
 struct aos_rpc* aos_rpc_get_init_channel (void)
 {
@@ -169,32 +173,43 @@ static bool str_to_args(const char* string, uint32_t* args, size_t args_length, 
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
-    // NOTE: Splitted due to size restriction in debug_printf
-    debug_printf ("aos_rpc_send_string(%u, ", chan);
-    printf ("%s)\n", string);
+    debug_printf ("aos_rpc_send_string. String to send (may be truncated): %s\n", string);
 
-    errval_t error = SYS_ERR_INVARGS_SYSCALL;
+    errval_t error = SYS_ERR_OK;
 
-    if (chan != NULL) {
-        bool finished = false;
-        int  indx = 0;
+    if (chan && chan -> shared_buffer == NULL) {
+        error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
+        debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
+    }
 
-        for (; finished == false ;) {
-            uint32_t buf[LMP_MSG_LENGTH] = {AOS_RPC_SEND_STRING,0,0,0,0,0,0,0,0};
-	
-            finished = str_to_args(&string[indx], &buf[1], 8, &indx, finished);
-            
-            error = lmp_chan_send9(&chan->channel, LMP_FLAG_SYNC | LMP_FLAG_YIELD, NULL_CAP, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]);
-            debug_printf_quiet ("transferred 32 bytes: %s\n", err_getstring (error));
+    assert (chan -> shared_buffer != NULL);
+    assert (chan -> shared_buffer_length != 0);
 
-            if (err_is_fail (error)) {
-                finished = true;
+    if (chan && err_is_ok (error)) {
+        // TODO: Gracefully handle this assertion.
+        assert (strlen (string) <= chan->shared_buffer_length);
 
-                print_error(error, "aos_rpc_send_string (0x%X) experienced error: %s\n", chan, err_getstring (error));
-            }
+        // Put the string into the shared buffer.
+        char* as_string_buffer = chan -> shared_buffer;
+        strncpy (as_string_buffer, string, chan -> shared_buffer_length);
+
+        struct lmp_message_args args;
+        init_lmp_message_args (&args, &(chan->channel));
+
+        // Set up the send arguments.
+        args.message.words [0] = AOS_RPC_SEND_STRING;
+        args.message.words [1] = chan -> memory_descriptor;
+
+        // Do the IPC call.
+        error = aos_send_receive (&args, true);
+        print_error (error, "aos_rpc_send_string: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+            error = args.message.words [0];
         }
-        
-        print_error (error, "aos_rpc_send_string (channel 0x%X): %s\n", err_getstring (error));
+    } else {
+        error = SYS_ERR_INVARGS_SYSCALL;
     }
     return error;
 }
@@ -894,10 +909,14 @@ errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain)
     return error;
 }
 
-errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t* memory_descriptor, void** buffer)
+/**
+ * Set up a shared frame within channel "rpc".
+ */
+static errval_t aos_rpc_setup_shared_buffer (struct aos_rpc* rpc, uint8_t size_bits)
 {
-    debug_printf_quiet ("aos_rpc_share_buffer...\n");
+    debug_printf_quiet ("aos_rpc_setup_shared_buffer...\n");
     errval_t error = SYS_ERR_OK;
+    void* buffer = NULL;
 
     // Allocate a frame.
     struct capref frame;
@@ -905,9 +924,8 @@ errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t*
 
     // Map it into our address space.
     if (err_is_ok (error)) {
-        error = paging_map_frame (get_current_paging_state(), buffer, (1ul << size_bits), frame, 0, 0);
+        error = paging_map_frame (get_current_paging_state(), &buffer, (1ul << size_bits), frame, 0, 0);
     }
-
     // Ask the server to map it into his address space.
     if (err_is_ok (error)) {
         struct lmp_chan* channel = &rpc->channel;
@@ -925,11 +943,19 @@ errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t*
         // Check if there's an error.
         if (err_is_ok (error)) {
             error = args.message.words [0];
-            if (err_is_ok (error) && memory_descriptor) {
-                *memory_descriptor = args.message.words [1];
+            if (err_is_ok (error)) {
+                rpc -> memory_descriptor = args.message.words [1];
+                rpc -> shared_buffer = buffer;
+                rpc -> shared_buffer_length = (1ul << size_bits);
             }
         }
     }
+
+    if (err_is_fail (error)) {
+        debug_printf ("Error: Buffer sharing failed!\n");
+        // TODO: Clean up mapping and return frame.
+    }
+
     return error;
 }
 
@@ -942,6 +968,10 @@ errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
     struct lmp_chan* channel = &rpc->channel;
     lmp_chan_init (channel);
     //DBG: Uncomment if you really need it ==> debug_printf ("Initializing channel %p\n", channel);
+
+    rpc -> memory_descriptor = 0;
+    rpc -> shared_buffer_length = 0;
+    rpc -> shared_buffer = NULL;
 
     // Provide a new set of message arguments.
     struct lmp_message_args args;
