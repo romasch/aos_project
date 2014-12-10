@@ -173,7 +173,7 @@ static bool str_to_args(const char* string, uint32_t* args, size_t args_length, 
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
-    debug_printf ("aos_rpc_send_string. String to send (may be truncated): %s\n", string);
+    debug_printf_quiet ("aos_rpc_send_string. String to send (may be truncated): %s\n", string);
 
     errval_t error = SYS_ERR_OK;
 
