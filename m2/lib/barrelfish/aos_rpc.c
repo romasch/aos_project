@@ -515,11 +515,7 @@ errval_t aos_rpc_open(struct aos_rpc *chan, char *path, int *fd)
                     *fd = args.message.words[1];
                 }
             }
-        } else {
-            print_error(-1, "aos_rpc_open: too long path (%s). \n", path);
         }
-    } else {
-        print_error(-1, "aos_rpc_open: invalid argument. \n");
     }
 
     return error;
@@ -573,7 +569,7 @@ errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **d
                             print_error (error, "aos_rpc_readdir: operation failed. %s\n", err_getstring (error));
 
                             if (err_is_ok (error)) {
-                                buffer[i].type = args.message.words[1];
+                                buffer[i].size = args.message.words[1];
                                 
                                 strcpy(buffer[i].name, (char*)(&args.message.words[2]));
                             }
@@ -628,9 +624,9 @@ errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size
 
                 if (err_is_ok (error)) {
                     *buflen = args.message.words[1];
-                    *buf    = malloc(size)         ;
+                    *buf    = malloc(*buflen)      ;
 
-                    memcpy(*buf, &args.message.words[2], *buflen);
+                    memcpy(*buf, &(args.message.words[2]), *buflen);
                 }
             }
         }

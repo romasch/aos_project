@@ -259,6 +259,8 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     uint32_t cluster_index = root_directory_cluster;
     uint32_t ret_cluster, ret_size;
 
+    struct aos_dirent new_entry;
+
 
     //fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", &ret_cluster, &ret_size);
 
@@ -274,8 +276,8 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
     uint32_t capacity = 1;
     uint32_t count = 0;
-    struct aos_dirent** result;
-    result = malloc (capacity * sizeof (struct aos_dirent*));
+    struct aos_dirent* result;
+    result = malloc (capacity * sizeof (struct aos_dirent));
 
      while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
         char sector [512];
@@ -316,7 +318,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     // Add more space if necessary.
                     if (count == capacity) {
                         capacity = capacity * 2;
-                        struct aos_dirent** new_result = realloc (result, capacity * sizeof (struct aos_dirent*));
+                        struct aos_dirent* new_result = realloc (result, capacity * sizeof (struct aos_dirent));
                         if (new_result) {
                             result = new_result;
                         } else {
@@ -325,38 +327,32 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     }
 
                     // Create the new entry.
-                    struct aos_dirent* new_entry = malloc (sizeof (struct aos_dirent));
+                    
+                    // FAT without extensions has 8.3 naming scheme.
+                    // This means we only need to copy 11 characters.
+                    strncpy (&(new_entry.name[0]), sector + base_offset, 11);
+                    new_entry.name [11] = '\0';
 
-                    if (new_entry) {
-
-                        // FAT without extensions has 8.3 naming scheme.
-                        // This means we only need to copy 11 characters.
-                        strncpy (&(new_entry->name[0]), sector + base_offset, 11);
-                        new_entry->name [11] = '\0';
-
-                        if (attributes & 0x10) {
-                            // Set size to zero for directories.
-                            new_entry -> size = 0;
-                            debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", entry_index, attributes, &new_entry->name, cluster_index_entry);
-                        } else {
-                            // Get the file size.
-                            uint32_t file_size = get_int (sector, base_offset + 0x1c);
-                            new_entry -> size = file_size;
-                            debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, &new_entry->name, cluster_index_entry, file_size);
-
-                            // Uncomment to print file content:
-//                             char filebuf [512];
-//                             errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
-//                             assert (err_is_ok (inner_error));
-//                             debug_printf ("File contents:\n%s\n", filebuf);
-
-                        }
-
-                        result [count] = new_entry;
-                        ++count;
+                    if (attributes & 0x10) {
+                        // Set size to zero for directories.
+                        new_entry.size = 0;
+                        debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry);
                     } else {
-                        error = LIB_ERR_MALLOC_FAIL;
+                        // Get the file size.
+                        uint32_t file_size = get_int (sector, base_offset + 0x1c);
+                        new_entry.size = file_size;
+                        debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry, file_size);
+
+                        // Uncomment to print file content:
+//                         char filebuf [512];
+//                         errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
+//                         assert (err_is_ok (inner_error));
+//                         debug_printf ("File contents:\n%s\n", filebuf);
+
                     }
+
+                    result [count] = new_entry;
+                    ++count;
                 }
                 else {
                     debug_printf_quiet ("Entry: %u, Unknown type. Attributes %u\n", attributes);
@@ -373,13 +369,10 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
 
     if (err_is_fail (error) || entry_list == NULL || entry_count == NULL) {
-        for (int i=0; i<count; i++) {
-            free (result[i]);
-        }
         free (result);
     } else {
-        *entry_list = *result;
-        *entry_count = count;
+        *entry_list  = result;
+        *entry_count = count ;
     }
 
     return error;

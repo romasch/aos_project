@@ -205,7 +205,7 @@ int main(int argc, char *argv[])
 {
     debug_printf("memeater started\n");
     pm_channel     = aos_rpc_get_init_channel ();
-    led_channel = aos_rpc_get_init_channel ();
+    led_channel    = aos_rpc_get_init_channel ();
     serial_channel = aos_rpc_get_serial_driver_channel ();
 
     aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
@@ -227,6 +227,50 @@ int main(int argc, char *argv[])
 //     aos_ping (aos_rpc_get_init_channel (), 45);
 //     test_process_api ();
 //     test_routing_to_domain();
+
+    int file = 0;
+    error = aos_rpc_open(filesystem_channel, "/testdir/hello.txt", NULL);
+        assert((error == -1) && (file == 0));
+
+    error = aos_rpc_open(filesystem_channel, "/veryveryveryveryveryverylongpath/hello.txt", &file);
+        assert((error == -1) && (file == 0));
+
+    error = aos_rpc_open(filesystem_channel, "/testdir/hello.txt", &file);
+        assert((error == 0) && (file != 0));
+
+    void  * buf    ;
+    size_t  buf_len;
+    error = aos_rpc_read(filesystem_channel, file, 0, 20, &buf, &buf_len);
+    assert(error == 0);
+    if (error == 0) {
+        char str[20];
+        
+        memset(str,   0, sizeof(str));
+        memcpy(str, buf,     buf_len);
+
+        assert(strcmp(str, "hello world!") == 0);
+
+        free(buf);
+    }
+
+    struct aos_dirent* dir       ;
+    size_t             elem_count;
+    error = aos_rpc_readdir(filesystem_channel, "/", &dir, &elem_count);
+    assert(error == 0);
+    if (error == 0) {
+        debug_printf ("Directory content:\n");
+
+        for (int i = 0; i < elem_count; i++) {
+            debug_printf ("\t%s\n", dir[i].name);
+        }
+        free(dir);
+    }
+
+    error = aos_rpc_close(NULL, file);
+        assert(error == -1);
+        
+    error = aos_rpc_close(filesystem_channel, file);
+        assert(error == 0);
 
     start_shell ();
 

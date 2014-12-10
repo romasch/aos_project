@@ -77,10 +77,10 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                             uint32_t words[7];
 
                             strncpy((char*)words, entry_list[idx].name, MAXNAMELEN);
-                        
-                            lmp_chan_send8(channel, 0, NULL_CAP, error, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
+
+                            lmp_chan_send9(channel, 0, NULL_CAP, error, entry_list[idx].size, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
                         } else {
-                            lmp_chan_send1(channel, 0, NULL_CAP,    -1                                                                      );
+                            lmp_chan_send1(channel, 0, NULL_CAP,    -1                                                                                            );
                         }
 
                         free(entry_list);
@@ -107,9 +107,9 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                     memcpy(words, buf, buflen);
                     free  (       buf        );
 
-                    lmp_chan_send8(channel, 0, NULL_CAP, error, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
+                    lmp_chan_send9(channel, 0, NULL_CAP, error, buflen, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
                 } else {
-                    lmp_chan_send1(channel, 0, NULL_CAP, error                                                                      );
+                    lmp_chan_send1(channel, 0, NULL_CAP, error                                                                              );
                 }
             }
             break;

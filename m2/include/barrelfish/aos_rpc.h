@@ -435,8 +435,6 @@ struct aos_dirent {
     char name[MAXNAMELEN];
     /// size of the item referenced
     size_t size;
-    /// Optional: add more information about a directory entry here
-    char   type;
 };
 
 /**
