@@ -151,6 +151,17 @@ static void default_handler (void* arg)
                 lmp_chan_send1 (channel, 0, NULL_CAP, error);
                 break;
 
+            case AOS_RPC_REGISTER_MEMORY:;
+                debug_printf_quiet ("Got AOS_RPC_REGISTER_MEMORY\n");
+                uint32_t descriptor = 0;
+                if (!capref_is_null (capability)) {
+                    error = map_shared_buffer (capability, &descriptor);
+                } else {
+                    // TODO: Is there a more suitable error?
+                    error = AOS_ERR_LMP_MSGTYPE_UNKNOWN;
+                }
+                lmp_chan_send2 (channel, 0, NULL_CAP, error, descriptor);
+                break;
             default:
                 // This is a message that may be handled by the external handler.
                 debug_printf_quiet ("Message for external handler\n");

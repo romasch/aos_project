@@ -894,6 +894,45 @@ errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain)
     return error;
 }
 
+errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t* memory_descriptor, void** buffer)
+{
+    debug_printf_quiet ("aos_rpc_share_buffer...\n");
+    errval_t error = SYS_ERR_OK;
+
+    // Allocate a frame.
+    struct capref frame;
+    error = frame_alloc (&frame, (1ul << size_bits), NULL);
+
+    // Map it into our address space.
+    if (err_is_ok (error)) {
+        error = paging_map_frame (get_current_paging_state(), buffer, (1ul << size_bits), frame, 0, 0);
+    }
+
+    // Ask the server to map it into his address space.
+    if (err_is_ok (error)) {
+        struct lmp_chan* channel = &rpc->channel;
+        // Provide a set of message arguments.
+        struct lmp_message_args args;
+        init_lmp_message_args (&args, channel);
+
+        // Set up the arguments according to the convention.
+        args.cap = frame;
+        args.message.words [0] = AOS_RPC_REGISTER_MEMORY;
+
+        // Do the actual IPC call.
+        error = aos_send_receive (&args, false);
+
+        // Check if there's an error.
+        if (err_is_ok (error)) {
+            error = args.message.words [0];
+            if (err_is_ok (error) && memory_descriptor) {
+                *memory_descriptor = args.message.words [1];
+            }
+        }
+    }
+    return error;
+}
+
 errval_t aos_rpc_init(struct aos_rpc *rpc, struct capref receiver)
 {
     // Initialize channel to receiver.

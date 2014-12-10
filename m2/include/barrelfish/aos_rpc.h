@@ -341,6 +341,30 @@ enum aos_service {
  */
 #define AOS_RPC_CLOSE_FILE 23
 
+/**
+ * Register an area of shared memory.
+ *
+ * Type: Synchronous
+ * Target: Any server.
+ * Send Arguments: -
+ * Send Capability: Frame to be shared
+ * Receive Args: Error value, memory descriptor
+ * Receive Capability: -
+ */
+#define AOS_RPC_REGISTER_MEMORY 24
+
+/**
+ * Delete an area of shared memory.
+ *
+ * Type: Synchronous
+ * Target: Any server.
+ * Send Arguments: Memory descriptor
+ * Send Capability: -
+ * Receive Args: Error value
+ * Receive Capability: -
+ */
+#define AOS_RPC_UNREGISTER_MEMORY 25
+
 struct aos_rpc {
     struct lmp_chan channel;
     // TODO: add state for your implementation
@@ -541,6 +565,10 @@ void aos_rpc_exit (struct aos_rpc* rpc);
  */
 errval_t aos_rpc_wait_for_termination (struct aos_rpc* rpc, domainid_t domain);
 
+/**
+ * \brief Set up a shared frame.
+ */
+errval_t aos_rpc_share_buffer (struct aos_rpc* rpc, uint8_t size_bits, uint32_t* memory_descriptor, void** buffer);
 
 /**
  * Ping a domain.

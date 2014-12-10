@@ -267,10 +267,17 @@ int main(int argc, char *argv[])
     }
 
     error = aos_rpc_close(NULL, file);
-        assert(error == -1);
+    assert(error == -1);
         
     error = aos_rpc_close(filesystem_channel, file);
-        assert(error == 0);
+    assert(error == 0);
+
+//     uint32_t md1, md2;
+//     void* buf1; void* buf2;
+//     error = aos_rpc_share_buffer (serial_channel, 12, &md1, &buf1);
+//     assert (err_is_ok (error));
+//     error = aos_rpc_share_buffer (serial_channel, 13, &md2, &buf2);
+//     assert (err_is_ok (error));
 
     start_shell ();
 
