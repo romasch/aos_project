@@ -1,4 +1,5 @@
 #include <aos_support/server.h>
+#include <aos_support/shared_buffer.h>
 #include <barrelfish/aos_dbg.h>
 
 // The user-defined, external handler.

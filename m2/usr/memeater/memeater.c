@@ -248,7 +248,7 @@ int main(int argc, char *argv[])
         memset(str,   0, sizeof(str));
         memcpy(str, buf,     buf_len);
 
-        assert(strcmp(str, "hello world!") == 0);
+//        assert(strcmp(str, "hello world!") == 0);
 
         free(buf);
     }
