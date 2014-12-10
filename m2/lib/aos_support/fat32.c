@@ -56,6 +56,50 @@ static uint32_t cluster_to_sector_number (uint32_t cluster_index)
     return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
 }
 
+static uint32_t fat_lookup (uint32_t cluster_index)
+{
+    char sector [512];
+    errval_t error;
+    uint32_t result = 0;
+    // Read the correct sector in the FAT table (consider upper 25 bits).
+    uint32_t fat_sector_offset = cluster_index >> 7;
+    debug_printf_quiet ("FAT sector offset: %u\n", fat_sector_offset);
+    error = fat32_driver_read_sector (fat32_fat_start + fat_sector_offset, sector);
+
+//         debug_printf_quiet ("Read block %d:\n", fat32_fat_start + fat_sector_offset);
+//         for (int i = 1; i <= 512; ++i)
+//         {
+//             printf ("%"PRIu8"\t", ((uint8_t*) sector)[i-1]);
+//             if (i % 4 == 0) {
+//                 printf("\n");
+//             }
+//         }
+
+    if (err_is_ok (error)) {
+        // Read the next cluster number in this FAT sector (lower 7 bits).
+        debug_printf_quiet ("FAT index: %u\n", cluster_index & 127);
+        result = ((uint32_t*) sector) [cluster_index & 127];
+
+        debug_printf_quiet ("Raw result: %x\n", result);
+
+        if (result < 0x0FFFFFF8) {
+            // According to https://www.pjrc.com/tech/8051/ide/fat32.html the top bits should be cleared
+            result = ((result << 4) >> 4);
+        } else {
+            // TODO In all other code we assumed (-1) is the end of mark,
+            // but it's actually anything >=0x0FFFFFF8.
+            // Maybe we should fix the other code.
+            result = 0xFFFFFFFF;
+        }
+
+    }
+    // TODO: Better error handling
+    debug_printf_quiet ("Result: %x\n", result);
+    assert (err_is_ok (error));
+    return result;
+}
+
+
 // errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
 static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
@@ -105,58 +149,62 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
             bool found_entry = false;
 
             while (cluster_index != 0xFFFFFFFF && err_is_ok (error) && !found_entry) {
+                for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
 
-                char sector [512];
-                error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
+                    char sector [512];
+                    error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
+                    //TODO; Early backoff
 
-                if (err_is_ok (error)) {
-                    for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && !found_entry; entry_index++) {
-                        uint32_t base_offset = entry_index * 32;
+                    if (err_is_ok (error)) {
+                        for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && !found_entry; entry_index++) {
+                            uint32_t base_offset = entry_index * 32;
 
-                        uint8_t first_byte = get_char (sector, base_offset);
-                        uint8_t attributes = get_char (sector, base_offset + 0x0b);
+                            uint8_t first_byte = get_char (sector, base_offset);
+                            uint8_t attributes = get_char (sector, base_offset + 0x0b);
 
-                        // The cluster index is split among two 16 bit fields.
-                        uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
-                        uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
-                        uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
+                            // The cluster index is split among two 16 bit fields.
+                            uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
+                            uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
+                            uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
 
-                        // Check what kind of directory entry it is.
-                        if (first_byte == 0xe5) {
-                            debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
-                        }
-                        else if (first_byte == 0x0) {
-                            debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
-                        }
-                        // Long file name from VFAT extension.
-                        else if ( (attributes & 0xF) == 0xF) {
-                            debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
-                        }
-                        else if (attributes & 0x8) {
-                            debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
-                        }
-                        // This is a file or directory. Finally, something to do.
-                        else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
-
-                            // FAT without extensions has 8.3 naming scheme.
-                            // This means we only need to copy 11 characters.
-                            if (strncmp (fat_name, sector+base_offset, 11) == 0) {
-                                cluster_index = cluster_index_entry;
-                                found_entry = true;
+                            // Check what kind of directory entry it is.
+                            if (first_byte == 0xe5) {
+                                debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
                             }
-                            if ((attributes & 0x20) || (attributes == 0)) {
-                                file_size = get_int (sector, base_offset + 0x1c);
+                            else if (first_byte == 0x0) {
+                                debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
+                            }
+                            // Long file name from VFAT extension.
+                            else if ( (attributes & 0xF) == 0xF) {
+                                debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
+                            }
+                            else if (attributes & 0x8) {
+                                debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
+                            }
+                            // This is a file or directory. Finally, something to do.
+                            else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
+
+                                // FAT without extensions has 8.3 naming scheme.
+                                // This means we only need to copy 11 characters.
+                                if (strncmp (fat_name, sector+base_offset, 11) == 0) {
+                                    cluster_index = cluster_index_entry;
+                                    found_entry = true;
+                                }
+                                if ((attributes & 0x20) || (attributes == 0)) {
+                                    file_size = get_int (sector, base_offset + 0x1c);
+                                } else {
+                                    file_size = 0;
+                                }
                             } else {
-                                file_size = 0;
+                                debug_printf_quiet ("Unknown entry. Attributes %u\n", attributes);
                             }
-                        } else {
-                            debug_printf_quiet ("Unknown entry. Attributes %u\n", attributes);
                         }
                     }
-                }
-                if (!found_entry) {
-                    //TODO: look up FAT table.
-                    cluster_index = 0xFFFFFFFF;
+                    if (!found_entry) {
+                        //TODO: look up FAT table.
+                        cluster_index = fat_lookup (cluster_index);
+    //                     cluster_index = 0xFFFFFFFF;
+                    }
                 }
             }
 
@@ -164,9 +212,6 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
                 debug_printf ("Not found!\n");
                 error = LIB_ERR_MALLOC_FAIL; //TODO: Find a suitable error for file not found.
             }
-
-            //TODO: Follow paths here.
-
         }
     }
     if (err_is_ok (error)) {
@@ -280,90 +325,95 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     result = malloc (capacity * sizeof (struct aos_dirent));
 
      while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
-        char sector [512];
-        error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
 
-        if (err_is_ok (error)) {
+         for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
 
-            for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES; entry_index++) {
+            char sector [512];
+            error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
 
-                uint32_t base_offset = entry_index * 32;
+            if (err_is_ok (error)) {
 
-                uint8_t first_byte = get_char (sector, base_offset);
-                uint8_t attributes = get_char (sector, base_offset + 0x0b);
+                for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES; entry_index++) {
 
-                // The cluster index is split among two 16 bit fields.
-                uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
-                uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
-                uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
-                cluster_index_entry = cluster_index_entry; // Avoid compiler warning.
+                    uint32_t base_offset = entry_index * 32;
 
-                // Check what kind of directory entry it is.
-                if (first_byte == 0xe5) {
-                    debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
-                }
-                else if (first_byte == 0x0) {
-                    debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
-                }
-                // Long file name from VFAT extension.
-                else if ( (attributes & 0xF) == 0xF) {
-                    debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
-                }
-                else if (attributes & 0x8) {
-                    debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
-                }
-                // This is a file or directory. Finally, something to do.
-                else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
+                    uint8_t first_byte = get_char (sector, base_offset);
+                    uint8_t attributes = get_char (sector, base_offset + 0x0b);
 
-                    // Add more space if necessary.
-                    if (count == capacity) {
-                        capacity = capacity * 2;
-                        struct aos_dirent* new_result = realloc (result, capacity * sizeof (struct aos_dirent));
-                        if (new_result) {
-                            result = new_result;
-                        } else {
-                            error = LIB_ERR_MALLOC_FAIL;
+                    // The cluster index is split among two 16 bit fields.
+                    uint32_t cluster_high = get_short (sector, base_offset + 0x14); // Higher 2 bytes.
+                    uint32_t cluster_low = get_short (sector, base_offset + 0x1a); // Lower 2 bytes.
+                    uint32_t cluster_index_entry = (cluster_high << 16) | cluster_low;
+                    cluster_index_entry = cluster_index_entry; // Avoid compiler warning.
+
+                    // Check what kind of directory entry it is.
+                    if (first_byte == 0xe5) {
+                        debug_printf_quiet ("Entry: %u, Deleted.\n", entry_index);
+                    }
+                    else if (first_byte == 0x0) {
+                        debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
+                        // TODO: We can skip the remaining entries.
+                    }
+                    // Long file name from VFAT extension.
+                    else if ( (attributes & 0xF) == 0xF) {
+                        debug_printf_quiet ("Entry: %u, Long filename. Attributes: %u\n", entry_index, attributes);
+                    }
+                    else if (attributes & 0x8) {
+                        debug_printf_quiet ("Entry: %u, Volume ID. Attributes: %u\n", entry_index, attributes);
+                    }
+                    // This is a file or directory. Finally, something to do.
+                    else if ((attributes & 0x10) || (attributes & 0x20) || (attributes == 0)) {
+
+                        // Add more space if necessary.
+                        if (count == capacity) {
+                            capacity = capacity * 2;
+                            struct aos_dirent* new_result = realloc (result, capacity * sizeof (struct aos_dirent));
+                            if (new_result) {
+                                result = new_result;
+                            } else {
+                                error = LIB_ERR_MALLOC_FAIL;
+                            }
                         }
+
+                        // Create the new entry.
+
+                        // FAT without extensions has 8.3 naming scheme.
+                        // This means we only need to copy 11 characters.
+                        strncpy (&(new_entry.name[0]), sector + base_offset, 11);
+                        new_entry.name [11] = '\0';
+
+                        if (attributes & 0x10) {
+                            // Set size to zero for directories.
+                            new_entry.size = 0;
+                            debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry);
+                        } else {
+                            // Get the file size.
+                            uint32_t file_size = get_int (sector, base_offset + 0x1c);
+                            new_entry.size = file_size;
+                            debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry, file_size);
+
+                            // Uncomment to print file content:
+//                             char filebuf [512];
+//                             errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
+//                             assert (err_is_ok (inner_error));
+//                             debug_printf ("File contents:\n%s\n", filebuf);
+
+                        }
+
+                        result [count] = new_entry;
+                        ++count;
+                    }
+                    else {
+                        debug_printf_quiet ("Entry: %u, Unknown type. Attributes %u\n", attributes);
                     }
 
-                    // Create the new entry.
-                    
-                    // FAT without extensions has 8.3 naming scheme.
-                    // This means we only need to copy 11 characters.
-                    strncpy (&(new_entry.name[0]), sector + base_offset, 11);
-                    new_entry.name [11] = '\0';
-
-                    if (attributes & 0x10) {
-                        // Set size to zero for directories.
-                        new_entry.size = 0;
-                        debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry);
-                    } else {
-                        // Get the file size.
-                        uint32_t file_size = get_int (sector, base_offset + 0x1c);
-                        new_entry.size = file_size;
-                        debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry, file_size);
-
-                        // Uncomment to print file content:
-//                         char filebuf [512];
-//                         errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
-//                         assert (err_is_ok (inner_error));
-//                         debug_printf ("File contents:\n%s\n", filebuf);
-
-                    }
-
-                    result [count] = new_entry;
-                    ++count;
                 }
-                else {
-                    debug_printf_quiet ("Entry: %u, Unknown type. Attributes %u\n", attributes);
-                }
-
             }
         }
 
-        // TODO: get next cluster index from File Allocation Table.
-        cluster_index = 0xFFFFFFFF;
-
+        // Get next cluster index from File Allocation Table.
+        cluster_index = fat_lookup (cluster_index);
+//      cluster_index = 0xFFFFFFFF;
     }
 
 

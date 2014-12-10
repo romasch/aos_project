@@ -2,6 +2,7 @@
 #include <barrelfish/capabilities.h>
 #include <barrelfish/paging.h>
 
+//TODO: Use a dynamic structure.
 #define MAX_BUFFER_COUNT 64
 
 struct buffer_manager_entry {
