@@ -56,6 +56,48 @@ static uint32_t cluster_to_sector_number (uint32_t cluster_index)
     return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
 }
 
+struct sector_stream {
+    uint32_t cluster_start;
+    uint32_t current_cluster;
+    uint32_t sector_index;
+};
+
+static void stream_init (struct sector_stream* stream, uint32_t a_cluster_start)
+{
+    stream -> cluster_start = a_cluster_start;
+    stream -> current_cluster= a_cluster_start;
+    stream -> sector_index = 0;
+}
+
+
+// Forward declaration.
+static uint32_t fat_lookup (uint32_t cluster_index);
+
+static bool stream_is_finished (struct sector_stream* stream)
+{
+    return (stream->current_cluster) >= 0x0FFFFFF8; //TODO: Define constant.
+}
+
+static errval_t stream_next (struct sector_stream* stream)
+{
+    stream -> sector_index++;
+
+    if (stream -> sector_index == fat32_sectors_per_cluster) {
+        stream -> sector_index = 0;
+        stream -> current_cluster = fat_lookup (stream -> current_cluster);
+    }
+    return SYS_ERR_OK; // TODO
+}
+
+static errval_t stream_load (struct sector_stream* stream, void* buffer)
+{
+    uint32_t sector_to_read = cluster_to_sector_number (stream -> current_cluster);
+    sector_to_read = sector_to_read + stream -> sector_index;
+    errval_t error = fat32_driver_read_sector (sector_to_read, buffer);
+    return error;
+}
+
+
 static uint32_t fat_lookup (uint32_t cluster_index)
 {
     char sector [512];
@@ -324,16 +366,27 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     struct aos_dirent* result;
     result = malloc (capacity * sizeof (struct aos_dirent));
 
-     while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
+    struct sector_stream stack_stream;
+    struct sector_stream* stream = &stack_stream;
+    stream_init (stream, cluster_index);
+    char sector [512];
 
-         for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
+    while ( !stream_is_finished (stream)) {
 
-            char sector [512];
-            error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
+        error = stream_load (stream, &sector);
 
-            if (err_is_ok (error)) {
 
-                for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES; entry_index++) {
+
+//      while (cluster_index != 0xFFFFFFFF && err_is_ok (error)) {
+//
+//          for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
+//
+//             char sector [512];
+//             error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
+//
+//             if (err_is_ok (error)) {
+
+                for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && err_is_ok (error); entry_index++) {
 
                     uint32_t base_offset = entry_index * 32;
 
@@ -438,14 +491,15 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     }
 
                 }
-            }
-        }
-
-        // Get next cluster index from File Allocation Table.
-        cluster_index = fat_lookup (cluster_index);
-//      cluster_index = 0xFFFFFFFF;
+//             }
+//         }
+//
+//         // Get next cluster index from File Allocation Table.
+//         cluster_index = fat_lookup (cluster_index);
+// //      cluster_index = 0xFFFFFFFF;
+//     }
+        error = stream_next (stream);
     }
-
 
 
     if (err_is_fail (error) || entry_list == NULL || entry_count == NULL) {
