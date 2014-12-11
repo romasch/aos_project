@@ -205,7 +205,7 @@ static void execute_ls(char* command)
     errval_t           error     ;
 
     error = aos_rpc_readdir(filesystem_channel, current_dir, &dir, &elem_count);
-    assert(err_is_ok(error));
+//     assert(err_is_ok(error));
     if (err_is_ok(error)) {
         printf (     "        Size | Name:\n");
         printf ("=========================\n");
@@ -332,6 +332,8 @@ static void start_shell (void)
             execute_ls      ( buf   );
         } else if (starts_with ("cat "       , buf) != false) {
             execute_cat     (&buf[4]);
+        } else if (strcmp ("cd\n", buf) == 0) {
+            current_dir [1] = '\0';
         } else {
             execute_external_command(&buf[0]);
         }
@@ -369,15 +371,16 @@ int main(int argc, char *argv[])
 //     test_process_api ();
 //     test_routing_to_domain();
 
-    int file = 0;
+    int file = -1;
     error = aos_rpc_open(filesystem_channel, "/testdir/hello.txt", NULL);
-        assert((error == -1) && (file == 0));
+        assert((error == -1) && (file == -1));
 
     error = aos_rpc_open(filesystem_channel, "/veryveryveryveryveryverylongpath/hello.txt", &file);
-        assert((error == -1) && (file == 0));
+        assert((error == -1) && (file == -1));
 
     error = aos_rpc_open(filesystem_channel, "/testdir/hello.txt", &file);
-        assert((error == 0) && (file != 0));
+    debug_printf ("%s\n", err_getstring (error));
+    assert((error == 0) && (file != -1));
 
     void  * buf    ;
     size_t  buf_len;
@@ -394,9 +397,15 @@ int main(int argc, char *argv[])
         free(buf);
     }
 
+
+    error = aos_rpc_close(filesystem_channel, file);
+    assert(error == 0);
+
     struct aos_dirent* dir       ;
     size_t             elem_count;
     error = aos_rpc_readdir(filesystem_channel, "/", &dir, &elem_count);
+//     error = aos_rpc_readdir(filesystem_channel, "/testdir/", &dir, &elem_count);
+//     error = aos_rpc_readdir(filesystem_channel, "/asdf/", &dir, &elem_count);
     assert(error == 0);
     if (error == 0) {
         debug_printf ("Directory content:\n");
@@ -409,9 +418,7 @@ int main(int argc, char *argv[])
 
     error = aos_rpc_close(NULL, file);
     assert(error == -1);
-        
-    error = aos_rpc_close(filesystem_channel, file);
-    assert(error == 0);
+
 
 //     uint32_t md1, md2;
 //     void* buf1; void* buf2;
@@ -423,6 +430,13 @@ int main(int argc, char *argv[])
     current_dir[1] = '\0';
 
     current_len = 1;
+
+//     aos_rpc_open(filesystem_channel, "/blub.txt" , &file);
+//     error = aos_rpc_read(filesystem_channel, file, 0, 20, &buf, &buf_len);
+//     execute_ls (NULL);
+//     error = aos_rpc_read(filesystem_channel, file, 0, 20, &buf, &buf_len);
+//     execute_ls (NULL);
+//     error = aos_rpc_read(filesystem_channel, file, 0, 20, &buf, &buf_len);
 
     start_shell ();
 

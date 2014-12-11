@@ -4,9 +4,10 @@
 
 #include <aos_support/fat32.h>
 #include <aos_support/server.h>
+#include <aos_support/shared_buffer.h>
 #include <barrelfish/aos_dbg.h>
 
-#define MAX_DIRS_SUPPORTED 32
+#define MAX_DIRS_SUPPORTED 64
 
 static char dir_table[MAXNAMELEN * MAX_DIRS_SUPPORTED];
     
@@ -28,69 +29,22 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                 lmp_chan_send2(channel, 0, NULL_CAP, error, file_descriptor);
             }
             break;
-        case AOS_RPC_READ_DIR:;
-            {
-                char* path = (char*)(&message->words[2]);
+        case AOS_RPC_READ_DIR_NEW:;
+            uint32_t mem_descriptor = message -> words [1];
+            void* buffer = NULL;
+            error = get_shared_buffer (mem_descriptor, &buffer, NULL);
+            assert (err_is_ok (error)); //TODO
+            debug_printf ("AOS_RPC_READ_DIR_NEW: Path %s, count %u\n", (char*) buffer, strlen(buffer));
 
-                struct aos_dirent* entry_list;
-                
-                size_t entry_count;
-
-                error = fat32_read_directory(path, &entry_list, &entry_count);
-                if (err_is_ok (error)) {
-                    uint32_t fd = MAX_DIRS_SUPPORTED;
-                        
-                    for (int i = 0; (i < MAX_DIRS_SUPPORTED) && (fd == MAX_DIRS_SUPPORTED); i++) {
-                        if (dir_table[MAXNAMELEN * i] == '\0') {
-                            fd = i;
-                        }
-                    }
-
-                    if (fd != MAX_DIRS_SUPPORTED) {
-                        strcpy(&dir_table[MAXNAMELEN * fd], path);
-
-                        lmp_chan_send3(channel, 0, NULL_CAP, error, ~fd, entry_count);
-                    } else {
-                        lmp_chan_send1(channel, 0, NULL_CAP,    -1                  );
-                    }
-
-                    free(entry_list);
-                } else {
-                    lmp_chan_send1(channel, 0, NULL_CAP, error);
-                }
+            struct aos_dirent* entries;
+            size_t count = 0;
+            error = fat32_read_directory((char*) buffer, &entries, &count);
+            if (err_is_ok (error)) {
+                memcpy (buffer, entries, count * sizeof (struct aos_dirent));
+                free (entries);
             }
-            break;
-        case AOS_RPC_READ_DIRX:;
-            {
-                uint32_t fd  = ~(message->words[2]);
-                
-                if (fd < MAX_DIRS_SUPPORTED) {
-                    uint32_t idx = message->words[3];
 
-                    struct aos_dirent* entry_list;
-                
-                    size_t entry_count;
-
-                    error = fat32_read_directory(&dir_table[fd * MAXNAMELEN], &entry_list, &entry_count);
-                    if (err_is_ok (error)) {
-                        if (idx < entry_count) {
-                            uint32_t words[7];
-
-                            strncpy((char*)words, entry_list[idx].name, MAXNAMELEN);
-
-                            lmp_chan_send9(channel, 0, NULL_CAP, error, entry_list[idx].size, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
-                        } else {
-                            lmp_chan_send1(channel, 0, NULL_CAP,    -1                                                                                            );
-                        }
-
-                        free(entry_list);
-                    } else {
-                        lmp_chan_send1(channel, 0, NULL_CAP, error);
-                    }
-                } else {
-                    lmp_chan_send1(channel, 0, NULL_CAP, -1);
-                }
-            }
+            lmp_chan_send2 (channel, 0, NULL_CAP, error, count);
             break;
         case AOS_RPC_READ_FILE:;
             {
@@ -172,7 +126,7 @@ errval_t start_filesystem_server (void)
     debug_printf ("FAT initialized\n");
 
     if (err_is_ok (error)) {
-        test_fs (); // TODO remove when not needed any more.
+//         test_fs (); // TODO remove when not needed any more.
         error = start_server (aos_service_filesystem, my_handler);
     }
     return error;

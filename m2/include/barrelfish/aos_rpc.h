@@ -365,6 +365,20 @@ enum aos_service {
  */
 #define AOS_RPC_UNREGISTER_MEMORY 25
 
+/**
+ * Read a directory.
+ *
+ * Type: Synchronous.
+ * Target: Filesystem driver
+ * Send Arguments: Memory descriptor
+ * Send Buffer: Path
+ * Receive Arguments: Error value, number of entries.
+ * Receive Buffer: Array of struct dirent.
+ */
+#define AOS_RPC_READ_DIR_NEW 26
+
+
+
 struct aos_rpc {
     uint32_t memory_descriptor;
     void* shared_buffer;

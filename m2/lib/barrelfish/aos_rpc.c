@@ -201,7 +201,7 @@ errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
         args.message.words [1] = chan -> memory_descriptor;
 
         // Do the IPC call.
-        error = aos_send_receive (&args, true);
+        error = aos_send_receive (&args, false);
         print_error (error, "aos_rpc_send_string: communication failed. %s\n", err_getstring (error));
 
         // Get the result.
@@ -539,74 +539,51 @@ errval_t aos_rpc_open(struct aos_rpc *chan, char *path, int *fd)
 errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **dir, size_t *elem_count)
 {
     // Read list of files from the directory
+    errval_t error = SYS_ERR_OK;
 
-    errval_t error = -1;
-
-    if ((chan != NULL) && (path != NULL) && (dir != NULL) && (elem_count != NULL)) {
-        if (strlen(path) <= MAX_PATH) {
-            struct lmp_message_args  args   ;
-            struct lmp_chan        * channel = &chan->channel;
-    
-            init_lmp_message_args(&args, channel);
-
-            args.message.words[0] = AOS_RPC_READ_DIR    ;
-            args.message.words[1] = disp_get_domain_id();
-            
-            strcpy((char*)(&args.message.words[2]), path);
-
-            error = aos_send_receive (&args, false);
-            print_error (error, "aos_rpc_readdir: communication failed. %s\n", err_getstring (error));
-
-            if (err_is_ok (error)) {
-                error = args.message.words [0];
-                print_error (error, "aos_rpc_readdir: operation failed. %s\n", err_getstring (error));
-
-                if (err_is_ok (error)) {
-                    struct aos_dirent* buffer;
-
-                    uint32_t fd     = args.message.words[1];
-                    uint32_t length = args.message.words[2];
-                       
-                    buffer = malloc(sizeof(struct aos_dirent) * length);
-
-                    for (uint32_t i = 0; (i < length) && err_is_ok (error); i++)
-                    {
-                        args.message.words[0] = AOS_RPC_READ_DIRX   ;
-                        args.message.words[1] = disp_get_domain_id();
-                        args.message.words[2] = fd                  ;
-                        args.message.words[3] = i                   ;
-                        
-                        error = aos_send_receive (&args, false);
-                        print_error (error, "aos_rpc_readdir: communication failed. %s\n", err_getstring (error));
-
-                        if (err_is_ok (error)) {
-                            error = args.message.words [0];
-                            print_error (error, "aos_rpc_readdir: operation failed. %s\n", err_getstring (error));
-
-                            if (err_is_ok (error)) {
-                                buffer[i].size = args.message.words[1];
-                                
-                                strcpy(buffer[i].name, (char*)(&args.message.words[2]));
-                            }
-                        }
-                    }
-                    
-                    if (err_is_ok (error)) {
-                        *dir        = buffer;
-                        *elem_count = length;
-                    } else {
-                        *dir        = NULL;
-                        *elem_count = 0   ;
-                        
-                        free(buffer);
-                    }
-
-                    aos_rpc_close(chan, fd);
-                }
-            }
-        }
+    if (chan && chan -> shared_buffer == NULL) {
+        error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
+        debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
     }
 
+    assert (chan -> shared_buffer != NULL);
+    assert (chan -> shared_buffer_length != 0);
+
+    if (chan && err_is_ok (error)) {
+        // TODO: Gracefully handle this assertion.
+        assert (strlen (path) <= chan->shared_buffer_length);
+
+        // Put the string into the shared buffer.
+        char* as_string_buffer = chan -> shared_buffer;
+        strncpy (as_string_buffer, path, chan -> shared_buffer_length);
+
+        struct lmp_message_args args;
+        init_lmp_message_args (&args, &(chan->channel));
+
+        // Set up the send arguments.
+        args.message.words [0] = AOS_RPC_READ_DIR_NEW;
+        args.message.words [1] = chan -> memory_descriptor;
+
+        // Do the IPC call.
+        error = aos_send_receive (&args, false);
+        print_error (error, "aos_rpc_send_string: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+            error = args.message.words [0];
+            if (err_is_ok (error)) {
+                uint32_t count = args.message.words [1];
+                void* buf = malloc (count * sizeof (struct aos_dirent));
+                // TODO check buf.
+                assert (buf != NULL);
+                memcpy (buf, chan->shared_buffer, count * sizeof (struct aos_dirent));
+                *dir = buf;
+                *elem_count = count;
+            }
+        }
+    } else {
+        error = SYS_ERR_INVARGS_SYSCALL;
+    }
     return error;
 }
 

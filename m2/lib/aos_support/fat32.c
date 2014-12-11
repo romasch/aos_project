@@ -145,12 +145,24 @@ static uint32_t fat_lookup (uint32_t cluster_index)
 // errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
 static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
+    debug_printf_quiet ("Find node %s\n", path);
+
     uint32_t path_index = 0;
     errval_t error = SYS_ERR_OK;
     bool end_of_path = false;
+    bool found_entry = false;
 
     uint32_t cluster_index = root_directory_cluster;
     uint32_t file_size = 0;
+
+    //TODO: Hack for root directory.
+    if (strcmp (path, "/") == 0) {
+        debug_printf ("root path\n");
+        *ret_cluster = cluster_index;
+        *ret_size = 0;
+        return SYS_ERR_OK;
+    }
+
 
     while (!end_of_path && err_is_ok (error)) {
         uint32_t fat_name_index = 0;
@@ -188,17 +200,27 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
         if (fat_name [0] != ' ') {
 
             debug_printf_quiet ("FAT name: ---%s---\n", fat_name);
-            bool found_entry = false;
+            found_entry = false;
 
-            while (cluster_index != 0xFFFFFFFF && err_is_ok (error) && !found_entry) {
-                for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
+            struct sector_stream stack_stream;
+            struct sector_stream* stream = &stack_stream;
+            stream_init (stream, cluster_index);
+            char sector [512];
+            bool early_stop = false;
 
-                    char sector [512];
-                    error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
-                    //TODO; Early backoff
+            while ( err_is_ok (error) && !stream_is_finished (stream) && !found_entry && !early_stop) {
 
-                    if (err_is_ok (error)) {
-                        for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && !found_entry; entry_index++) {
+               error = stream_load (stream, &sector);
+
+//             while (cluster_index != 0xFFFFFFFF && err_is_ok (error) && !found_entry) {
+//                 for (uint32_t sector_within_cluster=0; sector_within_cluster<fat32_sectors_per_cluster; sector_within_cluster++) {
+//
+//                     char sector [512];
+//                     error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index) + sector_within_cluster, sector);
+//                     //TODO; Early backoff
+//
+//                     if (err_is_ok (error)) {
+                        for (int entry_index = 0; err_is_ok (error) && entry_index < DIRECTORY_ENTRIES && !found_entry && !early_stop; entry_index++) {
                             uint32_t base_offset = entry_index * 32;
 
                             uint8_t first_byte = get_char (sector, base_offset);
@@ -215,6 +237,7 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
                             }
                             else if (first_byte == 0x0) {
                                 debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
+//                                 early_stop = true;
                             }
                             // Long file name from VFAT extension.
                             else if ( (attributes & 0xF) == 0xF) {
@@ -234,28 +257,32 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
                                 }
                                 if ((attributes & 0x20) || (attributes == 0)) {
                                     file_size = get_int (sector, base_offset + 0x1c);
+                                    debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, sector+base_offset, cluster_index_entry, file_size);
                                 } else {
                                     file_size = 0;
+                                    debug_printf_quiet ("Entry: %u, Directory. Attrib: %u. Name: %s. Cluster: %u.\n", entry_index, attributes, sector+base_offset, cluster_index_entry);
                                 }
                             } else {
                                 debug_printf_quiet ("Unknown entry. Attributes %u\n", attributes);
                             }
                         }
-                    }
-                    if (!found_entry) {
-                        //TODO: look up FAT table.
-                        cluster_index = fat_lookup (cluster_index);
-    //                     cluster_index = 0xFFFFFFFF;
-                    }
-                }
-            }
-
-            if (!found_entry && cluster_index == 0xFFFFFFFF) {
-                debug_printf ("Not found!\n");
-                error = LIB_ERR_MALLOC_FAIL; //TODO: Find a suitable error for file not found.
+//                     }
+//                     if (!found_entry) {
+//                         //TODO: look up FAT table.
+//                         cluster_index = fat_lookup (cluster_index);
+//     //                     cluster_index = 0xFFFFFFFF;
+//                     }
+//                 }
+                error = stream_next (stream);
             }
         }
     }
+
+    if (!found_entry) {
+        debug_printf ("Not found!\n");
+        error = LIB_ERR_MALLOC_FAIL; //TODO: Find a suitable error for file not found.
+    }
+
     if (err_is_ok (error)) {
         *ret_cluster = cluster_index;
         *ret_size = file_size;
@@ -314,24 +341,30 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 
     uint32_t cluster_index = descriptor_to_cluster [file_descriptor];
     uint32_t file_size = descriptor_to_size [file_descriptor];
+    debug_printf ("FD: %u, size: %u, Cluster index: %u, file size: %u, position %u\n", file_descriptor, size, cluster_index, file_size, position);
 
     // TODO: More graceful way of handling closed files.
     assert (cluster_index != 0 && file_size != 0);
 
     errval_t error = SYS_ERR_OK;
 
-    int8_t sector [512];
-    error = fat32_driver_read_sector (cluster_to_sector_number (cluster_index), sector);
+    char sector [512];
+    uint32_t sector_index = cluster_to_sector_number (cluster_index);
+    debug_printf ("Sector index: %u, root cluster:  %u, cluster_start: %u, fat32_sectors_per_cluster: %u, addr: %p\n", sector_index, root_directory_cluster, fat32_cluster_start, fat32_sectors_per_cluster, &fat32_sectors_per_cluster);
+    error = fat32_driver_read_sector (sector_index, sector);
 
     if (err_is_ok (error)) {
         uint32_t buffer_size = min (file_size - position, size);
         int8_t* buffer = malloc (buffer_size+1); // TODO: errors
+        assert (buffer != NULL);
 
         for (int i=0; i<buffer_size; i++) {
             buffer [i] = sector [i + position];
+            debug_printf ("%u\n", sector [i+position]);
         }
         // TODO: Do we actually need to null-terminate the buffer?
         buffer [buffer_size] = '\0';
+        debug_printf ("File contents: %s \n", (char*) buffer);
 
         *buf = buffer;
         *buflen = buffer_size;
@@ -352,14 +385,11 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     //fat32_find_node ("/echo/asdf.txt/hello world how are you/blub//test.exe/", &ret_cluster, &ret_size);
 
 //     debug_printf ("Testdir cluster: %u\n", ret_cluster);
-    fat32_find_node (path, &ret_cluster, &ret_size);
+    errval_t error = fat32_find_node (path, &ret_cluster, &ret_size);
     cluster_index = ret_cluster;
 
     // Check that it's a directory.
     assert (ret_size == 0); // TODO: graceful error recovery.
-
-
-    errval_t error = SYS_ERR_OK;
 
     uint32_t capacity = 1;
     uint32_t count = 0;
@@ -369,9 +399,10 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
     struct sector_stream stack_stream;
     struct sector_stream* stream = &stack_stream;
     stream_init (stream, cluster_index);
+    uint32_t early_stop = false;
     char sector [512];
 
-    while ( !stream_is_finished (stream)) {
+    while ( !stream_is_finished (stream) && err_is_ok (error) && !early_stop) {
 
         error = stream_load (stream, &sector);
 
@@ -386,7 +417,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 //
 //             if (err_is_ok (error)) {
 
-                for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && err_is_ok (error); entry_index++) {
+                for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && err_is_ok (error) && !early_stop; entry_index++) {
 
                     uint32_t base_offset = entry_index * 32;
 
@@ -406,6 +437,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                     else if (first_byte == 0x0) {
                         debug_printf_quiet ("Entry: %u, Null entry.\n", entry_index);
                         // TODO: We can skip the remaining entries.
+                        early_stop = true;
                     }
                     // Long file name from VFAT extension.
                     else if ( (attributes & 0xF) == 0xF) {
@@ -437,28 +469,28 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
                         int i;
                         int end = -1;
                         for (i = 7; i >= 0; i--) {
-                            if (*(sector + base_offset + i) == ' ') {
+                            if (sector [base_offset + i] == ' ') {
                                 if (end != -1) {
-                                    new_entry.name[i] = *(sector + base_offset + i);
+                                    new_entry.name[i] = sector [base_offset + i];
                                 }
                             } else {
                                 if (end == -1) {
                                     end = i + 1;
                                 }
 
-                                new_entry.name[i] = *(sector + base_offset + i);
+                                new_entry.name[i] = sector [base_offset + i];
                             }                            
                         }
 
-                        if (*(sector + base_offset + 8) != ' ') {
+                        if (sector [base_offset + 8] != ' ') {
                             new_entry.name[end] = '.';
                             end++;
 
                             for (i = 8; i < 11; i++) {
-                                if (*(sector + base_offset + i) == ' ') {
+                                if (sector [base_offset + i] == ' ') {
                                     i = 11;                                
                                 } else {
-                                    new_entry.name[end] = *(sector + base_offset + i);
+                                    new_entry.name[end] = sector [base_offset + i];
                                     end++;        
                                 }
                             }
@@ -604,6 +636,11 @@ void test_fs (void)
 
     debug_printf_quiet ("Reading directory: /asdf \n\n");
     fat32_read_directory ("/asdf", 0, 0);
+
+    for (int i=0; i<10; i++) {
+        debug_printf_quiet ("Reading directory: / \n\n");
+        fat32_read_directory ("/",0,0);
+    }
 
     debug_printf_quiet ("Finished tests\n");
 }
