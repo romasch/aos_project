@@ -379,8 +379,38 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
                         // FAT without extensions has 8.3 naming scheme.
                         // This means we only need to copy 11 characters.
-                        strncpy (&(new_entry.name[0]), sector + base_offset, 11);
-                        new_entry.name [11] = '\0';
+                        //strncpy (&(new_entry.name[0]), sector + base_offset, 11);
+                        //new_entry.name [11] = '\0';
+                        int i;
+                        int end = -1;
+                        for (i = 7; i >= 0; i--) {
+                            if (*(sector + base_offset + i) == ' ') {
+                                if (end != -1) {
+                                    new_entry.name[i] = *(sector + base_offset + i);
+                                }
+                            } else {
+                                if (end == -1) {
+                                    end = i + 1;
+                                }
+
+                                new_entry.name[i] = *(sector + base_offset + i);
+                            }                            
+                        }
+
+                        if (*(sector + base_offset + 8) != ' ') {
+                            new_entry.name[end] = '.';
+                            end++;
+
+                            for (i = 8; i < 11; i++) {
+                                if (*(sector + base_offset + i) == ' ') {
+                                    i = 11;                                
+                                } else {
+                                    new_entry.name[end] = *(sector + base_offset + i);
+                                    end++;        
+                                }
+                            }
+                        }
+                        new_entry.name[end] = '\0';
 
                         if (attributes & 0x10) {
                             // Set size to zero for directories.

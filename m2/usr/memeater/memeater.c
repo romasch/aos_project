@@ -12,6 +12,9 @@ static struct aos_rpc* pm_channel;
 static struct aos_rpc* led_channel;
 static struct aos_rpc* filesystem_channel;
 
+#define MAX_PATH 1024
+static char     current_dir[MAX_PATH];
+static uint32_t current_len          ;
 
 static bool starts_with(const char *prefix, const char *str)
 {
@@ -134,6 +137,138 @@ static void execute_remotely(char* command)
     }
 }
 
+static void execute_cd(char* command)
+{
+    debug_printf("CD - BEFORE: %s\n", current_dir);
+    char* end   = NULL;
+    char* start = NULL;
+        
+    for (; (isspace((int)*command) != false) && (*command != '\0'); command++);
+
+    start = command;
+
+    for (; *command != '\0' ; command++) {
+        if (*command == '/') {
+             end     = command + 1;
+            *command = '\0'       ;
+
+            // Process command
+            if (strcmp(start, "..\n") == 0) {
+                if (current_len != 1) {
+                    current_len--;
+                    current_dir[current_len] = '\0';
+
+                    for (; (current_len != 1) && (current_dir[current_len - 1] != '/');) {
+                        current_len--;
+                        current_dir[current_len] = '\0';
+                    }
+                }
+            } else {
+                strcat(current_dir, start);
+                
+                current_len = strlen(current_dir);
+                current_dir[current_len - 1] = '\0';
+
+                strcat(current_dir, "/");
+            }
+
+            start = end;
+        }
+    }
+
+    // Process command
+    if (strcmp(start, "..") == 0) {
+        if (current_len != 1) {
+            current_len--;
+            current_dir[current_len] = '\0';
+
+            for (; (current_len != 1) && (current_dir[current_len - 1] != '/');) {
+                current_len--;
+                current_dir[current_len] = '\0';
+            }
+        }
+    } else {
+        strcat(current_dir, start);
+                
+        current_len = strlen(current_dir);
+        current_dir[current_len - 1] = '\0';
+
+        strcat(current_dir, "/");
+    }
+    debug_printf("CD - AFTER: %s\n", current_dir);
+}
+
+static void execute_ls(char* command)
+{
+    struct aos_dirent* dir       ;
+    size_t             elem_count;
+    errval_t           error     ;
+
+    error = aos_rpc_readdir(filesystem_channel, current_dir, &dir, &elem_count);
+    assert(err_is_ok(error));
+    if (err_is_ok(error)) {
+        printf (     "        Size | Name:\n");
+        printf ("=========================\n");
+
+        for (int i = 0; i < elem_count; i++) {
+            if (dir[i].size == 0) {
+                printf ("\t           %s\n", dir[i].name);
+            }
+        }
+        
+        for (int i = 0; i < elem_count; i++) {
+            if (dir[i].size != 0) {
+                printf ("\t%8u | %s\n", dir[i].size, dir[i].name);
+            }
+        }
+
+        free(dir);
+    } else {
+        printf ("Invalid directory!\n");
+    }
+}
+
+static void execute_cat(char* command)
+{
+    for (; (isspace((int)*command) != false) && (*command != '\0'); command++);
+
+    if (*command != '\0') {
+        errval_t error;
+        int      file ;
+
+        strcat(current_dir, command);
+
+        error = aos_rpc_open(filesystem_channel, current_dir, &file);
+        if (!err_is_ok(error)) {
+            printf ("File does not exist!\n");
+        } else {
+            char    * chunk     = NULL;
+            uint32_t  chunk_id  =    0;
+            size_t    chunk_len =   27;
+
+            for (; (chunk_len == 27) && err_is_ok(error) ; chunk_id++){
+                error = aos_rpc_read(filesystem_channel, file, chunk_id * 27, 27, (void**)&chunk, &chunk_len);
+                if (err_is_ok(error)) {
+                    
+                    printf("%.80s\n", chunk);
+
+                    free(chunk);
+                }
+            }
+
+            if (!err_is_ok(error)) {
+                printf ("Error during reading!\n");    
+            }
+
+            aos_rpc_close(filesystem_channel, file);
+        }
+
+        current_dir[current_len] = '\0';
+    } else {
+        printf ("There is no argument required!\n");
+    } 
+}
+
 /**
  * A simple shell that handles echo, run_memtest and exit commands.
  */
@@ -182,15 +317,21 @@ static void start_shell (void)
             aos_rpc_set_led (led_channel, false);
         } else if (starts_with ("ps"         , buf) != false) {
             print_process_list();
-        } else if (starts_with ("kill ", buf)) {
+        } else if (starts_with ("kill "      , buf) != false) {
             int number = atoi(&buf[5]);
             aos_rpc_kill (pm_channel, number);
-        } else if (starts_with ("test_string", buf)) {
+        } else if (starts_with ("test_string", buf) != false) {
             error = aos_rpc_send_string (serial_channel, "Very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long test string\n");
-        } else if (starts_with ("ping", buf)) {
+        } else if (starts_with ("ping"       , buf) != false) {
             test_routing_to_domain();
-        } else if (starts_with ("oncore", buf)) {
-            execute_remotely(buf);
+        } else if (starts_with ("oncore"     , buf) != false) {
+            execute_remotely( buf   );
+        } else if (starts_with ("cd "        , buf) != false) {
+            execute_cd      (&buf[3]);
+        } else if (strcmp      ("ls\n"       , buf) == 0    ) {
+            execute_ls      ( buf   );
+        } else if (starts_with ("cat "       , buf) != false) {
+            execute_cat     (&buf[4]);
         } else {
             execute_external_command(&buf[0]);
         }
@@ -278,6 +419,10 @@ int main(int argc, char *argv[])
 //     assert (err_is_ok (error));
 //     error = aos_rpc_share_buffer (serial_channel, 13, &md2, &buf2);
 //     assert (err_is_ok (error));
+    current_dir[0] = '/' ;
+    current_dir[1] = '\0';
+
+    current_len = 1;
 
     start_shell ();
 
