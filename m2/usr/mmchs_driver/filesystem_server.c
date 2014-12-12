@@ -34,7 +34,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             void* buffer = NULL;
             error = get_shared_buffer (mem_descriptor, &buffer, NULL);
             assert (err_is_ok (error)); //TODO
-            debug_printf ("AOS_RPC_READ_DIR_NEW: Path %s, count %u\n", (char*) buffer, strlen(buffer));
+            debug_printf_quiet ("AOS_RPC_READ_DIR_NEW: Path %s, count %u\n", (char*) buffer, strlen(buffer));
 
             struct aos_dirent* entries;
             size_t count = 0;

@@ -312,34 +312,63 @@ static inline int min (int first, int second)
 
 errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen)
 {
-    // TODO Support reads which are bigger than a sector.
-    assert (position + size < 512);
-
     uint32_t cluster_index = descriptor_to_cluster [file_descriptor];
     uint32_t file_size = descriptor_to_size [file_descriptor];
     debug_printf_quiet ("FD: %u, size: %u, Cluster index: %u, file size: %u, position %u\n", file_descriptor, size, cluster_index, file_size, position);
 
-    // TODO: More graceful way of handling closed files.
-    assert (cluster_index != 0 && file_size != 0);
-
     errval_t error = SYS_ERR_OK;
-
+    struct sector_stream stack_stream;
+    struct sector_stream* stream = &stack_stream;
+    stream_init (stream, cluster_index);
+    uint32_t early_stop = false;
     char sector [512];
-    uint32_t sector_index = cluster_to_sector_number (cluster_index);
-    error = fat32_driver_read_sector (sector_index, sector);
 
-    if (err_is_ok (error)) {
-        uint32_t buffer_size = min (file_size - position, size);
-        int8_t* buffer = malloc (buffer_size+1); // TODO: errors
-        assert (buffer != NULL);
+    uint32_t file_index = 0;
+    uint32_t chars_read = 0;
+    uint32_t buffer_size = min (file_size - position, size);
+    int8_t* buffer = malloc (buffer_size+1);
+    if (!buffer) {
+        error = LIB_ERR_MALLOC_FAIL;
+    }
 
-        for (int i=0; i<buffer_size; i++) {
-            buffer [i] = sector [i + position];
+    while (!stream_is_finished (stream) && chars_read != size && err_is_ok (error)) {
+        error = stream_load (stream, sector);
+
+        // TODO: Use memcpy
+        for (int i=0; i<512; i++) {
+            if ( (file_index + i) >= (position + size) || (position + i) > file_size) {
+                early_stop = true;
+            } else if (position <= (file_index + i) && (file_index + i) < (position + size)) {
+                buffer [chars_read] = sector [i];
+                chars_read++;
+            }
         }
-        // TODO: Do we actually need to null-terminate the buffer?
-        buffer [buffer_size] = '\0';
-        debug_printf_quiet ("File contents: %s \n", (char*) buffer);
+        file_index += 512;
+        error = stream_next (stream);
+    }
 
+
+//     // TODO: More graceful way of handling closed files.
+//     assert (cluster_index != 0 && file_size != 0);
+//
+//     errval_t error = SYS_ERR_OK;
+//
+//     char sector [512];
+//     uint32_t sector_index = cluster_to_sector_number (cluster_index);
+//     error = fat32_driver_read_sector (sector_index, sector);
+//
+     if (err_is_ok (error)) {
+//         uint32_t buffer_size = min (file_size - position, size);
+//         int8_t* buffer = malloc (buffer_size+1); // TODO: errors
+//         assert (buffer != NULL);
+//
+//         for (int i=0; i<buffer_size; i++) {
+//             buffer [i] = sector [i + position];
+//         }
+//         // TODO: Do we actually need to null-terminate the buffer?
+//         buffer [buffer_size] = '\0';
+//         debug_printf_quiet ("File contents: %s \n", (char*) buffer);
+//
         *buf = buffer;
         *buflen = buffer_size;
     }

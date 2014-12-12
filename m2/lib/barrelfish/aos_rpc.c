@@ -591,7 +591,7 @@ errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size
 {
     // Read previously opened file
 
-    errval_t error = -1;
+    errval_t error = SYS_ERR_OK;
 
     if ((chan != NULL) && (buf != NULL) && (buflen != NULL)) {
         if (size <= MAX_PATH) {
