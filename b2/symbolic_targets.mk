@@ -462,6 +462,7 @@ PANDABOARD_MODULES=             \
     armv7/sbin/serial_driver    \
     armv7/sbin/hello_world      \
     armv7/sbin/mmchs            \
+    armv7/sbin/fsb              
 
 
 menu.lst.pandaboard: $(SRCDIR)/hake/menu.lst.pandaboard

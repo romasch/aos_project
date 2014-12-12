@@ -250,7 +250,7 @@ static void execute_cat(char* command)
                 error = aos_rpc_read(filesystem_channel, file, chunk_id * 27, 27, (void**)&chunk, &chunk_len);
                 if (err_is_ok(error)) {
                     
-                    printf("%.80s\n", chunk);
+                    printf("%.27s\n", chunk);
 
                     free(chunk);
                 }
