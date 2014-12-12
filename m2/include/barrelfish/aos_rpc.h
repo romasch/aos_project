@@ -303,7 +303,7 @@ enum aos_service {
  * Receive Args: error value and handle of directory and number of files contained in directory.
  * Receive Capability: -
  */
-#define AOS_RPC_READ_DIR 20
+// #define AOS_RPC_READ_DIR 20
 
 /**
  * Get name of file in directory (directories itself are files too)
@@ -315,7 +315,7 @@ enum aos_service {
  * Receive Args: error value and name and type of file contained in directory.
  * Receive Capability: -
  */
-#define AOS_RPC_READ_DIRX 21
+// #define AOS_RPC_READ_DIRX 21
 
 /**
  * Read data from opened file.
