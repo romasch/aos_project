@@ -66,12 +66,63 @@ void test_listings_package (void)
 \section {Modules}
 
 \subsection{Paging}
-\subsection{Communication / Message Passing}
+
+- Intent: quick lookup of page table, ``unmap'' requests from memory server
+
+- Data structues
+-- Simple for virtual memory
+-- 2-level array for page tables (mirroring actual page tables)
+-- linked list for frames
+
+- Problem: No unmap from domain itself
+-- esp. no recycling of virtual addresses
+-- we thought that malloc would never return memory anyway
+-- didn't think about domain spawning / bulk transfer with explicit map/unmap operations
+
+\subsection{Communication / Local Message Passing}
+
+- Synchronous message passing, one-to-one
+- channels between any client/server possible (not just init)
+- general format: service identifier, args -> reply: error code, args
+- aos\_rpc.c: client API
+-- support feature \lstinline!aos_send_receive!
+-- only initialize arguments and receive result.
+- aos\_support/server.c: generic server support routines
+- routing: in init - service registration, find requests
+- bulk transfer: shared buffer, bound to a channel
+- predefined channels (provided by libbarrelfish): init, serial\_driver
+
 \subsection{Shell and serial I/O}
+- Implemented in memeater.c
+- serial driver in own domain
+- \lstinline!set_foreground! for input selection
+-- disadvantage: not very safe...
+- big if-elseif construct to parse commands...
+- \lstinline!aos_rpc_send_string! to send a large string to serial driver, but currently not used
+
 \subsection{Process management}
+- currently done in init
+- server manages process table and info about loaded modules
+-- can be printed with ps command
+- shell attempts to start program with specific name if command not recognized
+- mechanism to register for end notification (foreground tasks)
+- kill command to revoke dispatcher capability (background tasks)
+- no further cleanup for zombie domains as for now
+
 \subsection{Mupltiple Cores}
+
+\todo {}
+
 \subsection{FAT file system}
+- filesystem code in aos\_support/fat32.c
+- handler in mmchs/filesystem\_server.c
+- Currently read-only
+- some support for partition tables
+- Performance improvements: sequential read? cached FAT? bulk transfer?
+
 \subsubsection{ ELF loading}
+
+\todo {Implement ELF loading}
 
 \section{Conclusion}
 
