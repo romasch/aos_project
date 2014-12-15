@@ -1,0 +1,89 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+
+
+% For the \todo{} command.
+\usepackage{todo}
+
+% Nice fonts
+\usepackage{palatino}
+% Needed for Listings package with Eiffel.
+% \usepackage{xcolor}
+% Source code listings.
+\usepackage{listings}
+% Appendix with extra title.
+% \usepackage [page] {appendix}
+% To include PNG files.
+% \usepackage{graphicx}
+% Nice looking captions.
+\usepackage[font={footnotesize,sl}, labelfont=bf] {caption}
+% Include PDF pages.
+% \usepackage{pdfpages}
+
+% Clickable links. Has to be the last package:
+\usepackage [hidelinks] {hyperref}
+
+
+\lstset{language=C,basicstyle=\ttfamily\small}
+
+
+\newcommand{\todoref}{\todo{ref}}
+
+% Title Page
+\title{Advanced Operating Systems \\ Project Report}
+\author{Roman Schmocker \\ Yauhen Klimiankou}
+
+
+\begin{document}
+
+\maketitle
+
+
+\section{Introduction}
+
+This report provides documentation for the operating system which we built as part of the project in the Advanced Operating Systems course.
+The code is based on a stripped-down version of Barrelfish \cite {web:barrelfish}.
+
+\todo{ more introduction}
+
+\section{Getting started}
+
+\begin{lstlisting}
+
+void test_listings_package (void);
+
+void test_listings_package (void)
+{
+  uint32_t an_int;
+  char* a_string = "asdf";
+  for (int i=0; i<42; i++) {
+    printf (a_string);
+  }
+}
+\end{lstlisting}
+
+
+\section {Modules}
+
+\subsection{Paging}
+\subsection{Communication / Message Passing}
+\subsection{Shell and serial I/O}
+\subsection{Process management}
+\subsection{Mupltiple Cores}
+\subsection{FAT file system}
+\subsubsection{ ELF loading}
+
+\section{Conclusion}
+
+\begin{flushleft}
+{{{
+\bibliographystyle {plain}
+\bibliography {./references}
+}}}
+\end{flushleft}
+
+
+\todos
+
+\end{document}          
+ 
