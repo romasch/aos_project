@@ -134,7 +134,38 @@ There are some parts in the code that directly interacts with the paging library
 Supporting this would have required us to rewrite a lot of existing code, and that's why we didn't do it in the end.
 This in turn means that our current solution leaks virtual addresses, but we tried to reduce this as much as possible by reusing the ranges of virtual memory.
 
-\subsection{Communication / Local Message Passing}
+\subsection{Local Message Passing}
+
+The local message passing (LMP) system is mostly implemented in \filepath{lib/barrelfish/aos\_rpc.c} for the client side.
+Some generic server-side features are implemented in \filepath{lib/aos\_support/server.c}.
+
+The LMP system has some important characteristics:
+\begin{itemize}
+ \item All messages are synchronous, i.e. receive is blocking.
+ \item The channels are always one-to-one connections.
+ \item The communication is client-server style.
+ \item We support direct connections to any server (i.e. no indirection through init).
+ \item Every ``send'' message has an enum constant as its first argument that denotes the message type.
+ \item Every ``reply'' message has an error code as its first argument.
+ \item All other arguments are determined by the actual message type.
+\end{itemize}
+
+The individual message types and their arguments are described in the header file \filepath{include/barrelfish/aos\_rpc.h}.
+To support writing code on the client side we implemented the feature \lstinline!aos_send_receive! which takes a struct containint all arguments, 
+sends a request to the server, waits for a reply, and copies the receive arguments back into the struct.
+That way we could avoid having to write the same functionality for every message type.
+
+Some servers provide core system services. Init for exampleprovides RAM, and the serial\_driver provides I/O.
+We therefore provide some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
+The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
+
+\subsubsection{Routing and Nameservice}
+
+
+
+
+\subsubsection{Bulk transfer}
+
 
 - Synchronous message passing, one-to-one
 - channels between any client/server possible (not just init)
