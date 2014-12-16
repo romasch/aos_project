@@ -210,6 +210,7 @@ Therefore the server just polls the serial device when a domain requests a chara
 Besides simple character transfer the serial driver also serves as the target of \lstinline!aos_rpc_set_foreground! to determine a single domain that can receive input and \lstinline!aos_rpc_send_string! to print a string.
 The latter makes use of the bulk transfer mechanism to avoid splitting and transmitting the string in small chunks.
 
+\todo{Mention that printf and scanf in libc is re-routed to use serial driver.}
 % - Implemented in memeater.c
 % - serial driver in own domain
 % - \lstinline!set_foreground! for input selection
