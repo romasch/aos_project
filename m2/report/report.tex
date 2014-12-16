@@ -28,6 +28,7 @@
 
 
 \newcommand{\todoref}{\todo{ref}}
+\newcommand{\filepath}[1]{\emph{ #1}}
 
 % Title Page
 \title{Advanced Operating Systems \\ Project Report}
@@ -67,17 +68,62 @@ void test_listings_package (void)
 
 \subsection{Paging}
 
-- Intent: quick lookup of page table, ``unmap'' requests from memory server
+The paging code is mostly contained in \filepath{lib/barrelfish/paging.c} and the corresponding header file.
 
-- Data structues
--- Simple for virtual memory
--- 2-level array for page tables (mirroring actual page tables)
--- linked list for frames
+The central element is the \lstinline!paging_state! struct.
+When desgining the data structure for the paging code we had these use cases in mind:
 
-- Problem: No unmap from domain itself
--- esp. no recycling of virtual addresses
--- we thought that malloc would never return memory anyway
--- didn't think about domain spawning / bulk transfer with explicit map/unmap operations
+\begin{itemize}
+ \item Fast lookup if an address is valid.
+ \item Fast lookup of the page tables associated to the virtual address.
+ \item Fast allocation of new frames.
+ \item Quick unmap operations when the memory server asks us to return a frame.
+\end{itemize}
+
+To support the first use case we just keep track of the allocated range of virtual addresses using two integer variables.
+That way determining if a page fault is ``valid'' is very simple: 
+If it's in the range, everything's ok and we can map a new frame, if not we abort the process due to an invalid address.
+
+The data structure of choice to represent the page table structure is a two-level array that mirrors the actual page tables in memory.
+Currently we only store the capability to the page tables and whether a certain page has been allocated at some point.
+We don't yet store any flags, pointers to a swap file or other metadata, but it would be easy to add this information.
+
+Frame management is a bit more complex because we always allocate frames of 1 MiB.
+That way we can avoid an IPC call for every single page fault, but we also have to keep track of free and allocated space within a frame.
+The \lstinline!struct frame_list! manages this information for a single frame.
+To support the last use case it also keeps track of the actual pages backed by this frame.
+
+The \lstinline!paging_state! struct then maintains a double ended queue of \lstinline!frame_list! nodes, where only the frame at the head of the list may contain some free space.
+
+As already mentioned, an important use case we had in mind were unmap requests from the memory server.
+We never implemented that functionality, but the data structure is designed to support it.
+An implementation would have to do the following:
+\begin{itemize}
+ \item Remove the last \lstinline!frame_list! element.
+ \item Write all pages backed by this frame to disk.
+ \item (Optionally) update some flags and metadata in the page table array.
+ \item Return the frame to the memory server.
+\end{itemize}
+
+\todo{Advantages and disadvantages}
+
+This has the disadvantage that we don't support returning \textbf{virtual} address space, but at that time we didn't think that this would be needed, 
+especially because the malloc/free implementation never returns any memory to morecore as well.
+
+
+
+% 
+% - Intent: quick lookup of page table, ``unmap'' requests from memory server
+% 
+% - Data structues
+% -- Simple for virtual memory
+% -- 2-level array for page tables (mirroring actual page tables)
+% -- linked list for frames
+% 
+% - Problem: No unmap from domain itself
+% -- esp. no recycling of virtual addresses
+% -- we thought that malloc would never return memory anyway
+% -- didn't think about domain spawning / bulk transfer with explicit map/unmap operations
 
 \subsection{Communication / Local Message Passing}
 
