@@ -161,11 +161,8 @@ The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_cha
 
 \subsubsection{Routing and Nameservice}
 
-
-
-
-\subsubsection{Bulk transfer}
-
+\todo {}
+The fact that clients can set up a direct channel to a server needs some extensions to the usual send-receive style message passing.
 
 - Synchronous message passing, one-to-one
 - channels between any client/server possible (not just init)
@@ -178,15 +175,50 @@ The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_cha
 - bulk transfer: shared buffer, bound to a channel
 - predefined channels (provided by libbarrelfish): init, serial\_driver
 
+
+\subsubsection{Bulk transfer}
+
+For a long time throughout the project we only had the basic message-passing communication model.
+Although this worked well, we always had to split an IPC call into several messages if the data to be transmitted exceeded the capacity of a single message.
+This was a tedious and error prone process, and due to this we decided to add a mechanism for bulk transfer.
+
+The basic idea is to set up a buffer which is shared between client and server.
+This setup is initiated by the client, and only when it is actually needed.
+
+We added a new message type which allowed a client to share a frame with a buffer and get back a ``memory\_descriptor'', which it can use afterwards for other IPC calls.
+The server-side part is implemented in \filepath{lib/aos\_support/}, which had the nice side effect that every server gained the buffer sharing mechanism for free without any further changes.
+The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, where it is now possible to ``attach'' a shared buffer to any \lstinline!struct aos_rpc! channel.
+
+The bulk transfer mechanism was a pretty late addition to the code base, therefore not all RPC calls have been changed to make use of it yet.
+
+
 \subsection{Shell and serial I/O}
-- Implemented in memeater.c
-- serial driver in own domain
-- \lstinline!set_foreground! for input selection
--- disadvantage: not very safe...
-- big if-elseif construct to parse commands...
-- \lstinline!aos_rpc_send_string! to send a large string to serial driver, but currently not used
+
+The shell is implemented in \filepath{usr/memeater/memeater.c}.
+It is started after init has initialized the core system services.
+
+The shell application basically executes an endless loop where it requests a character from the serial driver, stores it in a buffer, and echoes back the character.
+When the shell recognizes a newline character however it starts to evaluate the command.
+First it checks if the input matches one of its builtin commands, using a big \lstinline!if-else! construct.
+If no match is found the shell proceeds by trying to execute a binary with the name entered by the user (see Section \ref{sec:process-management}.
+
+The serial driver is responsible for terminal input and output functinality.
+It is located in \filepath{usr/serial\_driver/}.
+The implementation of the serial driver is quite simple, as we didn't implement interrupts.
+Therefore the server just polls the serial device when a domain requests a character, or writes output characters into a dedicated device register.
+
+Besides simple character transfer the serial driver also serves as the target of \lstinline!aos_rpc_set_foreground! to determine a single domain that can receive input and \lstinline!aos_rpc_send_string! to print a string.
+The latter makes use of the bulk transfer mechanism to avoid splitting and transmitting the string in small chunks.
+
+% - Implemented in memeater.c
+% - serial driver in own domain
+% - \lstinline!set_foreground! for input selection
+% -- disadvantage: not very safe...
+% - big if-elseif construct to parse commands...
+% - \lstinline!aos_rpc_send_string! to send a large string to serial driver, but currently not used
 
 \subsection{Process management}
+\label{sec:process-management}
 - currently done in init
 - server manages process table and info about loaded modules
 -- can be printed with ps command
