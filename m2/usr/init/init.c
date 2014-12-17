@@ -12,7 +12,6 @@
  * ETH Zurich D-INFK, Haldeneggsteig 4, CH-8092 Zurich. Attn: Systems Group.
  */
 
-#include "ipc_protocol.h"
 #include "init.h"
 #include <stdlib.h>
 #include <string.h>
