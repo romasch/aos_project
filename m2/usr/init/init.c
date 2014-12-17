@@ -27,11 +27,6 @@
 #include <elf/elf.h>
 #include <barrelfish_kpi/arm_core_data.h>
 
-// From Milestone 0...
-#define UART_BASE 0x48020000
-#define UART_SIZE 0x1000
-#define UART_SIZE_BITS 12
-
 #include <mm/mm.h>
 
 #include <aos_support/server.h>
@@ -40,9 +35,6 @@
 
 #include <aos_support/module_manager.h>
 
-#define BINARY_PREFIX "armv7/sbin/"
-
-// #define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
 #define DDB_FIXED_LENGTH 32
 
 // Entry of the process database maintained by init.
@@ -64,8 +56,6 @@ static struct ddb_entry ddb[DDB_FIXED_LENGTH];
 struct bootinfo *bi;
 static coreid_t my_core_id;
 
-// static struct capref service_uart;
-
 //Keeps track of registered services.
 struct lmp_chan* services [aos_service_guard];
 
@@ -73,16 +63,6 @@ struct lmp_chan* services [aos_service_guard];
 // TODO: use a system that supports removal as well.
 static struct lmp_chan* find_request [100];
 static int find_request_index = 0;
-
-// Keep track of mapped modules.
-// struct module_map_entry {
-//     char name [MAX_PROCESS_NAME_LENGTH + 1];
-//     struct mem_region* module;
-//     lvaddr_t binary;
-//     size_t binary_size;
-// };
-// static struct module_map_entry module_map [32];
-// static int module_map_size = 0;
 
 /**
  * Initialize some data structures.
@@ -98,8 +78,6 @@ static void init_data_structures (void)
     for (int i=0; i<aos_service_guard; i++) {
         services [i] = NULL;
     }
-//     memset (&module_map, 0, sizeof (module_map));
-//     module_map_size = 0;
 }
 
 static void recv_handler (void *arg);
@@ -160,33 +138,9 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
         return error;
     }
 
-    // Initialize memeater.
-    // NOTE: In upstream barrelfish, this function copies around some more capabilities.
-    // It doesn't seem to be necessary though...
-    // error = initialize_mem_serv(&new_domain);
-
-
     struct lmp_chan* initial_channel;
-
     if (err_is_ok (error)) {
         error = create_channel (&initial_channel);
-
-//         // Set up an LMP endpoint in init for the new domain.
-//         lmp_chan_init (ret_channel);
-//         error = lmp_chan_accept(ret_channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
-//
-//         // Register for incoming requests with the default handler.
-//         if (err_is_ok (error)) {
-//             error = lmp_chan_register_recv(ret_channel, get_default_waitset(), MKCLOSURE (recv_handler, ret_channel));
-//         }
-//         // Reserve a slot for incoming capabilities.
-//         if (err_is_ok (error)) {
-//             error = lmp_chan_alloc_recv_slot(ret_channel);
-//         }
-//         // Clean up in case of errors.
-//         if (err_is_fail (error)) {
-//             lmp_chan_destroy (ret_channel);
-//         }
     }
 
     // Copy the endpoint of the new channel into the new domain.
@@ -601,13 +555,6 @@ struct ElfDescriptor
     genvaddr_t  elfbase;
 };
 
-struct module_blob 
-{
-    size_t             size      ;
-    lvaddr_t           vaddr     ;
-    genpaddr_t         paddr     ;
-    struct mem_region* mem_region;
-};
 
 static errval_t elfload_allocate(void *state, genvaddr_t base, size_t size, uint32_t flags, void **retbase)
 {
@@ -723,26 +670,11 @@ static errval_t spawn_core(coreid_t cid)
 {
     errval_t err = SYS_ERR_OK;
 
-    struct mem_region* module = NULL;
-    size_t binary_size = 0;
-    lvaddr_t binary_virtual_addr = 0;
-    genpaddr_t binary_physical_addr = 0;
+    // Load the kernel binary.
+    struct module_info* info = NULL;
+    err = module_manager_load ("cpu_omap44xx", &info);
 
-    // Parse multiboot info.
-    module = multiboot_find_module(bi, "armv7/sbin/cpu_omap44xx");
-    assert (module != NULL); // TODO
-
-    // Map the binary blob into our address space.
-    err = spawn_map_module (module, &binary_size, &binary_virtual_addr, &binary_physical_addr);
     assert (err_is_ok (err));
-
-    struct module_blob cpu_blob;
-
-    cpu_blob.size       = binary_size         ;
-    cpu_blob.paddr      = binary_physical_addr;
-    cpu_blob.vaddr      = binary_virtual_addr ;
-    cpu_blob.mem_region = module              ;
-
 
     // allocate memory for cpu driver: we allocate a page for arm_core_data and
     // the reset for the elf image
@@ -753,7 +685,7 @@ static errval_t spawn_core(coreid_t cid)
         void                 * buf    ;
         struct frame_identity  frameid;
     } cpu_mem = {
-        .size = elf_virtual_size(cpu_blob.vaddr) + BASE_PAGE_SIZE
+        .size = elf_virtual_size(info -> virtual_address) + BASE_PAGE_SIZE
     };
 
     err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
@@ -775,21 +707,21 @@ static errval_t spawn_core(coreid_t cid)
 
     /* Setup the core_data struct in the new kernel */
     struct arm_core_data* core_data = (struct arm_core_data *)cpu_mem .buf  ;
-    struct Elf32_Ehdr   * head32    = (struct Elf32_Ehdr    *)cpu_blob.vaddr;
+    struct Elf32_Ehdr   * head32    = (struct Elf32_Ehdr    *) info -> virtual_address;
     
     core_data->elf.size = sizeof(struct Elf32_Shdr)                  ;
-    core_data->elf.addr = cpu_blob.paddr + (uintptr_t)head32->e_shoff;
+    core_data->elf.addr = info -> physical_address + (uintptr_t)head32->e_shoff;
     core_data->elf.num  = head32->e_shnum                            ;
 
 
-    core_data->module_start        = cpu_blob.paddr                ;
-    core_data->module_end          = cpu_blob.paddr + cpu_blob.size;
+    core_data->module_start        = info -> physical_address;
+    core_data->module_end          = info -> physical_address + info -> size;
     core_data->memory_base_start   = spawn_mem_frameid.base        ;
     core_data->memory_bits         = spawn_mem_frameid.bits        ;
     core_data->src_core_id         = my_core_id                    ;
     
-    err = elf_load_and_relocate(cpu_blob.vaddr,
-                                cpu_blob.size,
+    err = elf_load_and_relocate(info -> virtual_address,
+                                info -> size,
                                 cpu_mem.buf + BASE_PAGE_SIZE,
                                 cpu_mem.frameid.base + BASE_PAGE_SIZE,
                                 &reloc_entry);
@@ -983,7 +915,7 @@ int main(int argc, char *argv[])
             volatile uint32_t* as_int_array = shared_buffer;
             assert (as_int_array [0] == 0);
 
-//             err = spawn_core(1);
+            err = spawn_core(1);
             debug_printf ("spawn_core: %s\n", err_getstring (err));
 
             /* struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };

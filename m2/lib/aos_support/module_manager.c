@@ -30,6 +30,7 @@ static errval_t module_cache_resize (void)
     return error;
 }
 
+/// see header.
 errval_t module_manager_init (struct bootinfo* bi)
 {
     assert (bi != NULL);
@@ -48,9 +49,8 @@ errval_t module_manager_init (struct bootinfo* bi)
     return error;
 }
 
-
+/// see header.
 errval_t module_manager_load (char* domain_name, struct module_info** ret_module)
-
 {
     errval_t error = SYS_ERR_OK;
     bool found = false;
