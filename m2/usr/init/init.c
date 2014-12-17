@@ -610,6 +610,7 @@ static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, voi
     return SYS_ERR_OK;
 }
 
+__attribute__((unused))
 static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **buf_ret, struct frame_identity *frameid)
 {
     void         * buf = NULL;
@@ -644,26 +645,45 @@ static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **
     return SYS_ERR_OK;
 }
 
-static errval_t spawn_memory_prepare(size_t size, struct capref *cap_ret, struct frame_identity *frameid)
+/**
+ * Allocate and identify a frame.
+ *
+ * \param size: In-Out argument for the frame size.
+ * \param capability: Return parameter for the frame capability.
+ * \param frameid: Return parameter for the frame identity.
+ */
+static errval_t frame_prepare (size_t* size, struct capref* capability, struct frame_identity* frameid)
 {
-    struct capref cap;
+    errval_t error = SYS_ERR_OK;
+    error = frame_alloc (capability, *size, size);
 
-    errval_t err;
-    
-    err = frame_alloc(&cap, size, NULL);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    if (err_is_ok (error)) {
+        error = invoke_frame_identify(*capability, frameid);
     }
 
-    err = invoke_frame_identify(cap, frameid);
-    if (err_is_fail(err)) {
-        USER_PANIC_ERR(err, "frame_identify failed");
-    }
-
-    *cap_ret = cap;
-
-    return SYS_ERR_OK;
+    return error;
 }
+
+// static errval_t spawn_memory_prepare(size_t size, struct capref *cap_ret, struct frame_identity *frameid)
+// {
+//     struct capref cap;
+//
+//     errval_t err;
+//
+//     err = frame_alloc (&cap, size, NULL);
+//     if (err_is_fail(err)) {
+//         return err_push(err, LIB_ERR_FRAME_ALLOC);
+//     }
+//
+//     err = invoke_frame_identify(cap, frameid);
+//     if (err_is_fail(err)) {
+//         USER_PANIC_ERR(err, "frame_identify failed");
+//     }
+//
+//     *cap_ret = cap;
+//
+//     return SYS_ERR_OK;
+// }
 
 __attribute__((unused))
 static errval_t spawn_core(coreid_t cid)
@@ -679,6 +699,7 @@ static errval_t spawn_core(coreid_t cid)
     // allocate memory for cpu driver: we allocate a page for arm_core_data and
     // the reset for the elf image
     assert(sizeof(struct arm_core_data) <= BASE_PAGE_SIZE);
+
     struct {
         size_t                 size   ;
         struct capref          cap    ;
@@ -688,7 +709,13 @@ static errval_t spawn_core(coreid_t cid)
         .size = elf_virtual_size(info -> virtual_address) + BASE_PAGE_SIZE
     };
 
-    err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
+//     err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
+
+    err = frame_prepare (&cpu_mem.size, &cpu_mem.cap, &cpu_mem.frameid);
+    err = paging_map_frame_attr (get_current_paging_state(), &cpu_mem.buf, cpu_mem.size, cpu_mem.cap, VREGION_FLAGS_READ_WRITE_NOCACHE | VREGION_FLAGS_EXECUTE, NULL, NULL);
+
+
+
     assert (err_is_ok (err));
     if (err_is_fail(err)) {
         return err;
@@ -699,8 +726,10 @@ static errval_t spawn_core(coreid_t cid)
     /* Chunk of memory for app core */
     struct capref         spawn_mem_cap    ;
     struct frame_identity spawn_mem_frameid;
+    size_t size = ARM_CORE_DATA_PAGES * BASE_PAGE_SIZE;
 
-    err = spawn_memory_prepare(ARM_CORE_DATA_PAGES * BASE_PAGE_SIZE, &spawn_mem_cap, &spawn_mem_frameid);
+//    err = spawn_memory_prepare(ARM_CORE_DATA_PAGES * BASE_PAGE_SIZE, &spawn_mem_cap, &spawn_mem_frameid);
+    err = frame_prepare (&size, &spawn_mem_cap, &spawn_mem_frameid);
     if (!err_is_ok(err)) {
         return err;
     }
