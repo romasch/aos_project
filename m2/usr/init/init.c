@@ -51,7 +51,11 @@ struct ddb_entry
     char name[MAX_PROCESS_NAME_LENGTH + 1];
     struct capref dispatcher_frame;
     bool exists; // TODO: Use this instead of the name.
-    struct lmp_chan channel;
+    // Initial connection to domain.
+    // NOTE: Malloced and owned by this struct, needs to be freed.
+    struct lmp_chan* channel;
+    // Possible observer for termination events.
+    // NOTE: Not owned, do not free!
     struct lmp_chan* termination_observer;
 };
 
@@ -71,14 +75,14 @@ static struct lmp_chan* find_request [100];
 static int find_request_index = 0;
 
 // Keep track of mapped modules.
-struct module_map_entry {
-    char name [MAX_PROCESS_NAME_LENGTH + 1];
-    struct mem_region* module;
-    lvaddr_t binary;
-    size_t binary_size;
-};
-static struct module_map_entry module_map [32];
-static int module_map_size = 0;
+// struct module_map_entry {
+//     char name [MAX_PROCESS_NAME_LENGTH + 1];
+//     struct mem_region* module;
+//     lvaddr_t binary;
+//     size_t binary_size;
+// };
+// static struct module_map_entry module_map [32];
+// static int module_map_size = 0;
 
 /**
  * Initialize some data structures.
@@ -94,8 +98,8 @@ static void init_data_structures (void)
     for (int i=0; i<aos_service_guard; i++) {
         services [i] = NULL;
     }
-    memset (&module_map, 0, sizeof (module_map));
-    module_map_size = 0;
+//     memset (&module_map, 0, sizeof (module_map));
+//     module_map_size = 0;
 }
 
 static void recv_handler (void *arg);
@@ -106,9 +110,9 @@ static void recv_handler (void *arg);
  * \arg domain_name: The name of the new process. NOTE: Name should come
  * without path prefix, i.e. just pass "memeater" instead of "armv7/sbin/memeater".
  *
- * \arg ret_channel: Structure to be filled in with new channel.
+ * \arg ret_channel: Return parameter for allocated channel. May be NULL.
  */
-static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struct capref* ret_dispatcher, struct lmp_chan* ret_channel)
+static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struct capref* ret_dispatcher, struct lmp_chan** ret_channel)
 {
     //DBG: Uncomment if you really need it ==> debug_printf("Spawning new domain: %s...\n", domain_name);
     errval_t error = SYS_ERR_OK;
@@ -161,24 +165,28 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     // It doesn't seem to be necessary though...
     // error = initialize_mem_serv(&new_domain);
 
+
+    struct lmp_chan* initial_channel;
+
     if (err_is_ok (error)) {
+        error = create_channel (&initial_channel);
 
-        // Set up an LMP endpoint in init for the new domain.
-        lmp_chan_init (ret_channel);
-        error = lmp_chan_accept(ret_channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
-
-        // Register for incoming requests with the default handler.
-        if (err_is_ok (error)) {
-            error = lmp_chan_register_recv(ret_channel, get_default_waitset(), MKCLOSURE (recv_handler, ret_channel));
-        }
-        // Reserve a slot for incoming capabilities.
-        if (err_is_ok (error)) {
-            error = lmp_chan_alloc_recv_slot(ret_channel);
-        }
-        // Clean up in case of errors.
-        if (err_is_fail (error)) {
-            lmp_chan_destroy (ret_channel);
-        }
+//         // Set up an LMP endpoint in init for the new domain.
+//         lmp_chan_init (ret_channel);
+//         error = lmp_chan_accept(ret_channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+//
+//         // Register for incoming requests with the default handler.
+//         if (err_is_ok (error)) {
+//             error = lmp_chan_register_recv(ret_channel, get_default_waitset(), MKCLOSURE (recv_handler, ret_channel));
+//         }
+//         // Reserve a slot for incoming capabilities.
+//         if (err_is_ok (error)) {
+//             error = lmp_chan_alloc_recv_slot(ret_channel);
+//         }
+//         // Clean up in case of errors.
+//         if (err_is_fail (error)) {
+//             lmp_chan_destroy (ret_channel);
+//         }
     }
 
     // Copy the endpoint of the new channel into the new domain.
@@ -187,7 +195,12 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
         init_remote_cap.cnode = new_domain.taskcn;
         init_remote_cap.slot  = TASKCN_SLOT_INITEP;
 
-        error = cap_copy(init_remote_cap, ret_channel->local_cap);
+        error = cap_copy(init_remote_cap, initial_channel->local_cap);
+
+        if (ret_channel) {
+            *ret_channel = initial_channel;
+        }
+
     }
 
     // Make the domain runnable
@@ -933,7 +946,7 @@ int main(int argc, char *argv[])
     // TODO: need special initialization for second init.
     if (my_core_id == 0) {
     // Initialize the serial driver.
-        struct lmp_chan serial_chan;
+        struct lmp_chan* serial_chan;
         if (err_is_ok (err)) {
     //         init_uart_driver ();
             strcpy(ddb[2].name, "serial_driver");
@@ -944,7 +957,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        struct lmp_chan filesystem_chan;
+        struct lmp_chan* filesystem_chan;
         if (err_is_ok (err)) {
             strcpy(ddb[3].name, "mmchs");
             err = spawn_with_channel ("mmchs", 3, &(ddb[3].dispatcher_frame), &filesystem_chan);
@@ -982,7 +995,7 @@ int main(int argc, char *argv[])
         }
 
         // Spawn the shell.
-        struct lmp_chan memeater_chan;
+        struct lmp_chan* memeater_chan;
         strcpy(ddb[1].name, "memeater");
         spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
     } else {

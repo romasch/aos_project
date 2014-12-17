@@ -20,6 +20,15 @@ typedef void (*handler_function_t) (
 // static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, struct capref capability, uint32_t type)
 
 /**
+ * Create a new channel for this server.
+ * The channel is returned with a fully initialized handler function.
+ *
+ * \param ret_channel: The allocated channel. NOTE: If successful,
+ * client is responsible to free() the channel later.
+ */
+errval_t create_channel (struct lmp_chan** ret_channel);
+
+/**
  * \brief Handle an unknown message.
  *
  * Deletes the capability (if any) and sends back an error.

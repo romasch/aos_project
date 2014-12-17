@@ -25,11 +25,9 @@ dflt_handler_t get_default_handler (void)
     return default_handler;
 }
 
-/**
- * Creates a new LMP channel that is ready to accept messages.
- * If successful, client is responsible to free() the channel later.
- */
-static errval_t create_channel (struct lmp_chan** ret_channel)
+
+/// Creates a new LMP channel that is ready to accept messages.
+errval_t create_channel (struct lmp_chan** ret_channel)
 {
     errval_t error = SYS_ERR_OK;
     *ret_channel = NULL;
