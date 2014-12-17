@@ -17,6 +17,7 @@
                         "mem_serv.c",
                         "device_frame_server.c",
                         "test_thread.c",
+                        "cross_core_channel.c",
                         "led_driver.c" ],
                       flounderDefs = [ "mem" ],
                       addLinkFlags = [ "-e _start_init"],

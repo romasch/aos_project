@@ -31,6 +31,12 @@ errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struc
 // A test thread for init.
 errval_t spawn_test_thread ( void (*handler_func) (void* arg));
 
+// Cross core communication:
+#define IKC_MSG_REMOTE_SPAWN 0x0FFFFFFFU
+void* ikc_rpc_call(void* message, int size);
+int ikc_server(void* data);
+void* get_cross_core_buffer (void);
+
 // LED controls:
 errval_t led_init (void);
 void led_set_state (bool new_state);

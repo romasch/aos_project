@@ -283,10 +283,9 @@ static void push_ikc_message(void* message, int size)
     debug_printf ("push_ikc_message -\n");
 }
 
-static void* ikc_rpc_call(void* message, int size)
+void* ikc_rpc_call(void* message, int size)
 {
     push_ikc_message(message, size);
-
     return pop_ikc_message();
 }
 
@@ -696,12 +695,15 @@ static errval_t spawn_core(coreid_t cid)
     return sys_boot_core (cid, reloc_entry);
 }
 
+void* get_cross_core_buffer (void) {
+    return shared_buffer;
+}
 
 __attribute__((unused))
 static struct thread* ikcsrv;
 
-__attribute__((unused))
-static int ikc_server(void* data)
+
+int ikc_server(void* data)
 {
     while (true) {
         errval_t  err    ;
