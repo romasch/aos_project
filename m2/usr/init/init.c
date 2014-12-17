@@ -119,62 +119,23 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     new_domain.domain_id = domain_id;
 
     // Find the module.
-    struct mem_region* module = NULL;
-    lvaddr_t binary = 0;
-    size_t binary_size = 0;
-
     struct module_info* info;
     error = module_manager_load (domain_name, &info);
 
     if (err_is_ok (error)) {
-        // TODO: use these values directly.
-        module = info->module;
-        binary = info->virtual_address;
-        binary_size = info->size;
-    }
 
+        assert (info != NULL);
 
-//         // Concatenate the name.
-//     char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
-//     strcpy (prefixed_name, BINARY_PREFIX);
-//     strcat (prefixed_name, domain_name);
-//
-//     for (int i=0; i<module_map_size; i++) {
-//         if (strcmp (module_map [i].name, domain_name) == 0)  {
-//             module = module_map [i].module;
-//             binary = module_map [i].binary;
-//             binary_size = module_map [i].binary_size;
-//             break;
-//         }
-//     }
-//     // Not found. Try bootinfo.
-//     if (!module) {
-//         module = multiboot_find_module(bi, prefixed_name);
-//         if (module == NULL) {
-//             debug_printf("could not find module [%s] in multiboot image\n", prefixed_name);
-//             error = SPAWN_ERR_FIND_MODULE;
-//         } else {
-//             // Lookup and map the elf image
-//             error = spawn_map_module(module, &binary_size, &binary, NULL);
-//             if (err_is_fail(error)) {
-//                 error = err_push(error, SPAWN_ERR_ELF_MAP);
-//             } else {
-//                 strcpy ( module_map [module_map_size].name, domain_name);
-//                 module_map [module_map_size].module = module;
-//                 module_map [module_map_size].binary = binary;
-//                 module_map [module_map_size].binary_size = binary_size;
-//                 module_map_size++;
-//             }
-//         }
-//     }
-    char* argv [] = {domain_name, NULL};
-    char* envp [] = {NULL};
+            // Set up default arguments.
+        // TODO: Support user-provided arguments.
+        char* argv [] = {domain_name, NULL};
+        char* envp [] = {NULL};
 
-    if (err_is_ok (error)) {
+        // Load the image and set up addess space, cspace etc.
         error = spawn_load_image (
             &new_domain,
-            binary,
-            binary_size,
+            info->virtual_address,
+            info->size,
             CPU_ARM,
             domain_name,
             my_core_id,
