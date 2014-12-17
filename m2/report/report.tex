@@ -159,21 +159,46 @@ Some servers provide core system services. Init for exampleprovides RAM, and the
 We therefore provide some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
 The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
 
-\subsubsection{Routing and Nameservice}
+\subsubsection{Connection setup and name service}
 
-\todo {}
-The fact that clients can set up a direct channel to a server needs some extensions to the usual send-receive style message passing.
+In our LMP implementation we wanted to support direct channels between two domains.
+To do that we had to implement some additional functionality, in particular a simple name service and a mechanism to set up a new connection.
 
-- Synchronous message passing, one-to-one
-- channels between any client/server possible (not just init)
-- general format: service identifier, args -> reply: error code, args
-- aos\_rpc.c: client API
--- support feature \lstinline!aos_send_receive!
--- only initialize arguments and receive result.
-- aos\_support/server.c: generic server support routines
-- routing: in init - service registration, find requests
-- bulk transfer: shared buffer, bound to a channel
-- predefined channels (provided by libbarrelfish): init, serial\_driver
+The design of the name service is very simple.
+In \filepath{aos\_rpc.h} we added an enum type \lstinline!aos_service! which is used for some of the core system services, such as the serial driver or the FAT file system.
+Each domain that acts as a server for such a core system service then has to register itself via the \lstinline!AOS_RPC_REGISTER_SERVICE! LMP message.
+Init itself keeps track of all registered servers and therefore acts as a name service.
+
+When a client wants to find a particular service, it sends a request to init, and init replies with a new endpoint capability of the specified domain.
+This was a bit tricky to implement, because we only allow one-to-one connections, so init first has to request a new endpoint from the (registered) server.
+Init shouldn't mix the reply however with some other request from another domain, therefore we had to break our usual send-reply protocol and plan this interaction carefully.
+
+In chronological order, this is what happens when a domain wants to find, for example, the serial driver:
+
+\begin{itemize}
+ \item The client sends an \lstinline!AOS_RPC_FIND_SERVICE! with the enum constant of the serial driver to init.
+ \item Init uses a new request ID (a ``cookie'') and remembers the channel that sent the request.
+ \item Init checks if the serial driver is registered and sends an \lstinline!AOS_ROUTE_REQUEST_EP!.
+ This call includes the previously generated request ID.
+ \item The serial driver handles the enpoint request call by creating a new channel.
+ It replies to init with an \lstinline!AOS_ROUTE_DELIVER_EP! which contains the new endpoint and the unchanged request ID as arguments.
+ Note that this RPC call doesn't follow the usual send-reply style message exchange, because the reply contains a message type argument.
+ \item Thanks to the special reply format init can handle the request like any other LMP message.
+ When receiving the \lstinline!AOS_ROUTE_DELIVER_EP!, init retrieves the channel that initially sent the \lstinline!AOS_RPC_FIND_SERVICE! request using the request ID and forwards the endpoint.
+ \item The client domain wakes up again receives the new endpoint, which it can then use to establish a direct connection to the serial driver.
+\end{itemize}
+
+
+% - Synchronous message passing, one-to-one
+% - channels between any client/server possible (not just init)
+% - general format: service identifier, args -> reply: error code, args
+% - aos\_rpc.c: client API
+% -- support feature \lstinline!aos_send_receive!
+% -- only initialize arguments and receive result.
+% - aos\_support/server.c: generic server support routines
+% - routing: in init - service registration, find requests
+% - bulk transfer: shared buffer, bound to a channel
+% - predefined channels (provided by libbarrelfish): init, serial\_driver
 
 
 \subsubsection{Bulk transfer}
@@ -185,7 +210,7 @@ This was a tedious and error prone process, and due to this we decided to add a 
 The basic idea is to set up a buffer which is shared between client and server.
 This setup is initiated by the client, and only when it is actually needed.
 
-We added a new message type which allowed a client to share a frame with a buffer and get back a ``memory\_descriptor'', which it can use afterwards for other IPC calls.
+We added a new message type which allowed a client to share a frame with a buffer and get back a \lstinline!memory_descriptor!, which it can use afterwards for other IPC calls.
 The server-side part is implemented in \filepath{lib/aos\_support/}, which had the nice side effect that every server gained the buffer sharing mechanism for free without any further changes.
 The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, where it is now possible to ``attach'' a shared buffer to any \lstinline!struct aos_rpc! channel.
 
@@ -200,7 +225,7 @@ It is started after init has initialized the core system services.
 The shell application basically executes an endless loop where it requests a character from the serial driver, stores it in a buffer, and echoes back the character.
 When the shell recognizes a newline character however it starts to evaluate the command.
 First it checks if the input matches one of its builtin commands, using a big \lstinline!if-else! construct.
-If no match is found the shell proceeds by trying to execute a binary with the name entered by the user (see Section \ref{sec:process-management}.
+If no match is found the shell proceeds by trying to execute a binary with the name entered by the user (see Section \ref{sec:process-management}).
 
 The serial driver is responsible for terminal input and output functinality.
 It is located in \filepath{usr/serial\_driver/}.
@@ -231,6 +256,10 @@ The latter makes use of the bulk transfer mechanism to avoid splitting and trans
 \subsection{Mupltiple Cores}
 
 \todo {}
+
+- Spawning cores on low level.
+- Setup of ELF image
+- Communication between cores
 
 \subsection{FAT file system}
 - filesystem code in aos\_support/fat32.c
