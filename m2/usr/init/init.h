@@ -21,6 +21,7 @@
 
 extern struct bootinfo *bi;
 
+// Physical memory server functions.
 errval_t initialize_ram_alloc(void);
 errval_t initialize_mem_serv(void);
 
@@ -28,17 +29,20 @@ errval_t initialize_mem_serv(void);
 errval_t initialize_device_frame_server (struct capref io_space_cap);
 errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struct capref* ret_frame);
 
-// A test thread for init.
-errval_t spawn_test_thread ( void (*handler_func) (void* arg));
+// Cross core setup:
+errval_t init_cross_core_buffer (void);
+void* get_cross_core_buffer (void);
+errval_t spawn_core (coreid_t core_identifier);
 
 // Cross core communication:
 #define IKC_MSG_REMOTE_SPAWN 0x0FFFFFFFU
 void* ikc_rpc_call(void* message, int size);
 int ikc_server(void* data);
-void* get_cross_core_buffer (void);
 
 // LED controls:
 errval_t led_init (void);
 void led_set_state (bool new_state);
 
+// A test thread.
+errval_t spawn_test_thread ( void (*handler_func) (void* arg));
 #endif // INIT_H
