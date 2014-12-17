@@ -549,100 +549,62 @@ static errval_t initep_setup (void)
     return err;
 } //*/
 
-struct ElfDescriptor
+static errval_t dummy_elfload_allocate (void *state, genvaddr_t base, size_t size, uint32_t flags, void **retbase)
 {
-    void      * vbase  ;
-    genvaddr_t  elfbase;
-};
-
-
-static errval_t elfload_allocate(void *state, genvaddr_t base, size_t size, uint32_t flags, void **retbase)
-{
-    struct ElfDescriptor *s = state;
-
-    *retbase = (char *)s->vbase + base - s->elfbase;
-
+    *retbase = state + base;
     return SYS_ERR_OK;
 }
 
-static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, void *to, lvaddr_t reloc_dest, uintptr_t *reloc_entry)
+static errval_t elf_load_and_relocate(lvaddr_t blob_start, size_t blob_size, void *target, lvaddr_t reloc_dest, uintptr_t *reloc_entry)
 {
-    struct Elf32_Ehdr   * head    = (struct Elf32_Ehdr *)blob_start;
-    struct Elf32_Shdr   * symhead; 
-    struct Elf32_Shdr   * rel    ;
-    struct Elf32_Shdr   * symtab ;
-    struct ElfDescriptor  state  ;
+    errval_t error = SYS_ERR_OK;
+    struct Elf32_Shdr* symhead = NULL;
+    struct Elf32_Shdr* rel = NULL;
+    struct Elf32_Shdr* symtab = NULL;
 
-    genvaddr_t entry;
-    errval_t   err  ;
+    struct Elf32_Ehdr* head = (struct Elf32_Ehdr *)blob_start;
+    genvaddr_t elf_vbase = elf_virtual_base (blob_start);
+    void* dummy_elfload_allocate_value = target - elf_vbase;
 
-    state.vbase   = to                          ;
-    state.elfbase = elf_virtual_base(blob_start);
+    genvaddr_t entry = 0;
+    error = elf_load (
+            head->e_machine,
+            dummy_elfload_allocate,
+            dummy_elfload_allocate_value,
+            blob_start,
+            blob_size,
+            &entry);
 
-    err = elf_load(head->e_machine, elfload_allocate, &state, blob_start, blob_size, &entry);
-    assert (err_is_ok (err));
-    if (err_is_fail(err)) {
-        return err;
+    if (err_is_ok(error)) {
+
+        // Relocate to new physical base address
+        symhead = (struct Elf32_Shdr *)(blob_start + (uintptr_t)head->e_shoff);
+        rel     = elf32_find_section_header_type(symhead, head->e_shnum, SHT_REL);
+        symtab  = elf32_find_section_header_type(symhead, head->e_shnum, SHT_DYNSYM);
+
+        if (rel && symtab) {
+
+            elf32_relocate (
+                reloc_dest,
+                elf_vbase,
+                (struct Elf32_Rel *) (blob_start + rel -> sh_offset),
+                rel->sh_size,
+                (struct Elf32_Sym *) (blob_start + symtab -> sh_offset),
+                symtab->sh_size,
+                elf_vbase,
+                target
+            );
+
+            *reloc_entry = entry - elf_vbase + reloc_dest;
+
+        } else {
+            // Something seems to be wrong with the ELF image.
+            // TODO: Check if there's a more suitable error.
+            error = ELF_ERR_PROGHDR;
+        }
     }
 
-    // Relocate to new physical base address
-    symhead = (struct Elf32_Shdr *)(blob_start + (uintptr_t)head->e_shoff);
-    rel     = elf32_find_section_header_type(symhead, head->e_shnum, SHT_REL   );
-    symtab  = elf32_find_section_header_type(symhead, head->e_shnum, SHT_DYNSYM);
-    
-    assert(rel != NULL && symtab != NULL);
-
-    elf32_relocate
-    (
-        reloc_dest                                          , 
-        state.elfbase                                       ,  
-        (struct Elf32_Rel *)(blob_start + rel   ->sh_offset), 
-        rel->sh_size                                        , 
-        (struct Elf32_Sym *)(blob_start + symtab->sh_offset), 
-        symtab->sh_size                                     , 
-        state.elfbase                                       , 
-        state.vbase
-    );
-    assert (err_is_ok (err));
-
-    *reloc_entry = entry - state.elfbase + reloc_dest;
-
-    return SYS_ERR_OK;
-}
-
-__attribute__((unused))
-static errval_t cpu_memory_prepare(size_t *size, struct capref *cap_ret, void **buf_ret, struct frame_identity *frameid)
-{
-    void         * buf = NULL;
-    struct capref  cap;
-    errval_t       err;
-    
-    err = frame_alloc(&cap, *size, size);
-    assert (err_is_ok (err));
-    if (err_is_fail(err)) {
-        USER_PANIC("Failed to allocate %zd memory\n", *size);
-    }
-
-    err = paging_map_frame_attr (get_current_paging_state(), &buf, *size, cap, VREGION_FLAGS_READ_WRITE_NOCACHE | VREGION_FLAGS_EXECUTE, NULL, NULL);
-    assert (err_is_ok (err));
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_VSPACE_MAP);
-    }
-
-    if (err_is_fail(err)) {
-        return err;
-    }
-    
-    err = invoke_frame_identify(cap, frameid);
-    assert (err_is_ok (err));
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_FRAME_IDENTIFY);
-    }
-
-    *cap_ret = cap;
-    *buf_ret = buf;
-
-    return SYS_ERR_OK;
+    return error;
 }
 
 /**
@@ -664,78 +626,63 @@ static errval_t frame_prepare (size_t* size, struct capref* capability, struct f
     return error;
 }
 
-// static errval_t spawn_memory_prepare(size_t size, struct capref *cap_ret, struct frame_identity *frameid)
-// {
-//     struct capref cap;
-//
-//     errval_t err;
-//
-//     err = frame_alloc (&cap, size, NULL);
-//     if (err_is_fail(err)) {
-//         return err_push(err, LIB_ERR_FRAME_ALLOC);
-//     }
-//
-//     err = invoke_frame_identify(cap, frameid);
-//     if (err_is_fail(err)) {
-//         USER_PANIC_ERR(err, "frame_identify failed");
-//     }
-//
-//     *cap_ret = cap;
-//
-//     return SYS_ERR_OK;
-// }
-
 __attribute__((unused))
 static errval_t spawn_core(coreid_t cid)
 {
+    assert(sizeof(struct arm_core_data) <= BASE_PAGE_SIZE);
+
     errval_t err = SYS_ERR_OK;
 
     // Load the kernel binary.
     struct module_info* info = NULL;
     err = module_manager_load ("cpu_omap44xx", &info);
 
-    assert (err_is_ok (err));
-
-    // allocate memory for cpu driver: we allocate a page for arm_core_data and
-    // the reset for the elf image
-    assert(sizeof(struct arm_core_data) <= BASE_PAGE_SIZE);
-
-    struct {
-        size_t                 size   ;
-        struct capref          cap    ;
-        void                 * buf    ;
-        struct frame_identity  frameid;
-    } cpu_mem = {
-        .size = elf_virtual_size(info -> virtual_address) + BASE_PAGE_SIZE
-    };
-
-//     err = cpu_memory_prepare(&cpu_mem.size, &cpu_mem.cap, &cpu_mem.buf, &cpu_mem.frameid);
-
-    err = frame_prepare (&cpu_mem.size, &cpu_mem.cap, &cpu_mem.frameid);
-    err = paging_map_frame_attr (get_current_paging_state(), &cpu_mem.buf, cpu_mem.size, cpu_mem.cap, VREGION_FLAGS_READ_WRITE_NOCACHE | VREGION_FLAGS_EXECUTE, NULL, NULL);
-
-
-
-    assert (err_is_ok (err));
-    if (err_is_fail(err)) {
+    if (err_is_fail (err)) {
         return err;
     }
 
-    uintptr_t reloc_entry;
+    // Allocate memory for cpu driver:
+    // We allocate a page for arm_core_data and the rest for the elf image.
+    size_t kernel_memory_size = elf_virtual_size(info -> virtual_address) + BASE_PAGE_SIZE;
+    void* kernel_memory_buffer = NULL;
+    struct capref kernel_memory_capability;
+    struct frame_identity kernel_frame_identity;
 
-    /* Chunk of memory for app core */
+    err = frame_prepare (&kernel_memory_size, &kernel_memory_capability, &kernel_frame_identity);
+
+    if (err_is_ok (err)) {
+
+        // Map the frame into our address space.
+        err = paging_map_frame_attr (
+                get_current_paging_state(),
+                &kernel_memory_buffer,
+                kernel_memory_size,
+                kernel_memory_capability,
+                VREGION_FLAGS_READ_WRITE_NOCACHE | VREGION_FLAGS_EXECUTE,
+                NULL, NULL);
+
+    }
+
+    if (err_is_fail (err)) {
+        cap_destroy (kernel_memory_capability);
+        return err;
+    }
+
+    // TODO: Apparently this whole setup for the core data struct is not necessary...
+/*
+    // Chunk of memory for app core
     struct capref         spawn_mem_cap    ;
     struct frame_identity spawn_mem_frameid;
     size_t size = ARM_CORE_DATA_PAGES * BASE_PAGE_SIZE;
 
-//    err = spawn_memory_prepare(ARM_CORE_DATA_PAGES * BASE_PAGE_SIZE, &spawn_mem_cap, &spawn_mem_frameid);
+
     err = frame_prepare (&size, &spawn_mem_cap, &spawn_mem_frameid);
     if (!err_is_ok(err)) {
         return err;
     }
 
-    /* Setup the core_data struct in the new kernel */
-    struct arm_core_data* core_data = (struct arm_core_data *)cpu_mem .buf  ;
+    // Setup the core_data struct in the new kernel
+    struct arm_core_data* core_data = (struct arm_core_data *) kernel_memory_buffer;
     struct Elf32_Ehdr   * head32    = (struct Elf32_Ehdr    *) info -> virtual_address;
     
     core_data->elf.size = sizeof(struct Elf32_Shdr)                  ;
@@ -748,11 +695,12 @@ static errval_t spawn_core(coreid_t cid)
     core_data->memory_base_start   = spawn_mem_frameid.base        ;
     core_data->memory_bits         = spawn_mem_frameid.bits        ;
     core_data->src_core_id         = my_core_id                    ;
-    
-    err = elf_load_and_relocate(info -> virtual_address,
+    */
+    uintptr_t reloc_entry;
+    err = elf_load_and_relocate (info -> virtual_address,
                                 info -> size,
-                                cpu_mem.buf + BASE_PAGE_SIZE,
-                                cpu_mem.frameid.base + BASE_PAGE_SIZE,
+                                kernel_memory_buffer + BASE_PAGE_SIZE,
+                                kernel_frame_identity.base + BASE_PAGE_SIZE,
                                 &reloc_entry);
     assert (err_is_ok (err));
 
