@@ -7,5 +7,13 @@
 -- 
 --------------------------------------------------------------------------
 
-[ build library { target = "aos_support", cFiles = [ "server.c", "fat32.c", "shared_buffer.c" ] } ]
+[ build library {
+            target = "aos_support",
+            cFiles = [
+                "server.c",
+                "fat32.c",
+                "shared_buffer.c",
+                "module_manager.c" ],
+            addLibraries = [ "spawndomain", "elf" ]
+    } ]
 

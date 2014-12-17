@@ -38,6 +38,8 @@
 #include <barrelfish/aos_dbg.h>
 #include <aos_support/shared_buffer.h>
 
+#include <aos_support/module_manager.h>
+
 #define BINARY_PREFIX "armv7/sbin/"
 
 // #define COUNT_OF(x) (sizeof(x) / sizeof(x[0]))
@@ -93,6 +95,7 @@ static void init_data_structures (void)
         services [i] = NULL;
     }
     memset (&module_map, 0, sizeof (module_map));
+    module_map_size = 0;
 }
 
 static void recv_handler (void *arg);
@@ -115,48 +118,55 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     memset (&new_domain, 0, sizeof (struct spawninfo));
     new_domain.domain_id = domain_id;
 
-    // Concatenate the name.
-    char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
-    strcpy (prefixed_name, BINARY_PREFIX);
-    strcat (prefixed_name, domain_name);
-
-    //TODO: Probably we shouldn't use spawn_load_with_bootinfo.
-    // Try to find a better suited function
-//     error = spawn_load_with_bootinfo (&new_domain, bi, prefixed_name, my_core_id);
-
     // Find the module.
     struct mem_region* module = NULL;
     lvaddr_t binary = 0;
     size_t binary_size = 0;
 
-    for (int i=0; i<module_map_size; i++) {
-        if (strcmp (module_map [i].name, domain_name) == 0)  {
-            module = module_map [i].module;
-            binary = module_map [i].binary;
-            binary_size = module_map [i].binary_size;
-            break;
-        }
+    struct module_info* info;
+    error = module_manager_load (domain_name, &info);
+
+    if (err_is_ok (error)) {
+        // TODO: use these values directly.
+        module = info->module;
+        binary = info->virtual_address;
+        binary_size = info->size;
     }
-    // Not found. Try bootinfo.
-    if (!module) {
-        module = multiboot_find_module(bi, prefixed_name);
-        if (module == NULL) {
-            debug_printf("could not find module [%s] in multiboot image\n", prefixed_name);
-            error = SPAWN_ERR_FIND_MODULE;
-        } else {
-            // Lookup and map the elf image
-            error = spawn_map_module(module, &binary_size, &binary, NULL);
-            if (err_is_fail(error)) {
-                error = err_push(error, SPAWN_ERR_ELF_MAP);
-            } else {
-                strcpy ( module_map [module_map_size].name, domain_name);
-                module_map [module_map_size].module = module;
-                module_map [module_map_size].binary = binary;
-                module_map [module_map_size].binary_size = binary_size;
-                module_map_size++;
-            }
-        }
-    }
+
+
+//         // Concatenate the name.
+//     char prefixed_name [256]; // TODO: prevent buffer overflow attacks...
+//     strcpy (prefixed_name, BINARY_PREFIX);
+//     strcat (prefixed_name, domain_name);
+//
+//     for (int i=0; i<module_map_size; i++) {
+//         if (strcmp (module_map [i].name, domain_name) == 0)  {
+//             module = module_map [i].module;
+//             binary = module_map [i].binary;
+//             binary_size = module_map [i].binary_size;
+//             break;
+//         }
+//     }
+//     // Not found. Try bootinfo.
+//     if (!module) {
+//         module = multiboot_find_module(bi, prefixed_name);
+//         if (module == NULL) {
+//             debug_printf("could not find module [%s] in multiboot image\n", prefixed_name);
+//             error = SPAWN_ERR_FIND_MODULE;
+//         } else {
+//             // Lookup and map the elf image
+//             error = spawn_map_module(module, &binary_size, &binary, NULL);
+//             if (err_is_fail(error)) {
+//                 error = err_push(error, SPAWN_ERR_ELF_MAP);
+//             } else {
+//                 strcpy ( module_map [module_map_size].name, domain_name);
+//                 module_map [module_map_size].module = module;
+//                 module_map [module_map_size].binary = binary;
+//                 module_map [module_map_size].binary_size = binary_size;
+//                 module_map_size++;
+//             }
+//         }
+//     }
     char* argv [] = {domain_name, NULL};
     char* envp [] = {NULL};
 
@@ -937,6 +947,10 @@ int main(int argc, char *argv[])
     led_init ();
     led_set_state (true);
 
+    // Initialize the module manager.
+    err = module_manager_init (bi);
+    assert (err_is_ok (err));
+
 
     // Get the capability to the shared frame.
     struct capref shared_frame = cap_initep;
@@ -995,7 +1009,7 @@ int main(int argc, char *argv[])
             volatile uint32_t* as_int_array = shared_buffer;
             assert (as_int_array [0] == 0);
 
-            //err = spawn_core(1);
+//             err = spawn_core(1);
             debug_printf ("spawn_core: %s\n", err_getstring (err));
 
             /* struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
