@@ -79,8 +79,6 @@ static void init_data_structures (void)
     }
 }
 
-static void recv_handler (void *arg);
-
 /**
  * Spawn a new domain with an initial channel to init.
  *
@@ -484,14 +482,6 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 }
 
 /**
- * TODO: Find all occurrences of recv_handler and replace them with get_default_handler().
- */
-static void recv_handler (void *arg)
-{
-    (get_default_handler ())(arg);
-}
-
-/**
  * Set up the user-level data structures for the
  * kernel-created endpoint for init.
  */
@@ -534,7 +524,7 @@ static errval_t initep_setup (void)
 
             } else {
                 // Register a receive handler.
-                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(recv_handler, channel));
+                err = lmp_chan_register_recv(channel, get_default_waitset(), MKCLOSURE(get_default_handler(), channel));
                 if (err_is_fail(err))
                 {
                     debug_printf ("ERROR: On channel registration.\n");
