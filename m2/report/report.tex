@@ -255,6 +255,31 @@ The latter makes use of the bulk transfer mechanism to avoid splitting and trans
 
 \subsection{Mupltiple Cores}
 
+\subsubsection{Preparing the kernel image}
+
+The preparation of the kernel image is mostly done in \filepath{usr/init/cross\_core\_setup.c}.
+The implementation is heavily inspired\footnote{copy-pasted} from the upstream Barrelfish code base.
+Compared to the upstream mechanism we implemented some simplifications however, since we don't have to support more than two cores.
+We also adapted the code a bit to our own data structures.
+
+\subsubsection{Low-level mechanisms}
+
+To start the second core one has to call the \lstinline!sys_boot_core! system call, which eventually executes \lstinline!start_aps_arm_start! in the first kernel.
+Within this function there's no magic going on - it just writes the start address for the second core to a regsiter and issues an interrupt.
+
+The real magic happens in \lstinline!arch_init! in \filepath{kernel/arch/omap44xx/init.c} and  \lstinline{arm_kernel_startup} in \filepath{kernel/arch/omap44xx/startup\_arch.c}.
+In \lstinline!arch_init! we set up the \lstinline!global! struct which contains data to be shared between both kernels.
+Among the data shared between the two kernels is the multiboot image.
+We also reserve a region of physical addresses as a buffer for future cross core communication and store the physical address and size of it in the \lstinline!global! struct.
+
+In \lstinline!arm_kernel_startup! we do a static split of the available physical memory.
+Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.
+Finally, we also create the capability to the shared frame in this functions and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
+
+\subsubsection{Cross core communication}
+
+
+
 \todo {}
 
 - Spawning cores on low level.
