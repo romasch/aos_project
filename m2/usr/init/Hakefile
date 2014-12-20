@@ -19,6 +19,7 @@
                         "test_thread.c",
                         "cross_core_setup.c",
                         "cross_core_channel.c",
+                        "process_manager.c",
                         "led_driver.c" ],
                       flounderDefs = [ "mem" ],
                       addLinkFlags = [ "-e _start_init"],

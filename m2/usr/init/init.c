@@ -28,7 +28,7 @@
 #define DDB_FIXED_LENGTH 32
 
 // Entry of the process database maintained by init.
-struct ddb_entry
+struct domain_info
 {
     char name[MAX_PROCESS_NAME_LENGTH + 1];
     struct capref dispatcher_frame;
@@ -41,7 +41,12 @@ struct ddb_entry
     struct lmp_chan* termination_observer;
 };
 
-static struct ddb_entry ddb[DDB_FIXED_LENGTH];
+static struct domain_info ddb[DDB_FIXED_LENGTH];
+
+static struct domain_info* get_domain_info (domainid_t id)
+{
+    return &(ddb[id]);
+}
 
 struct bootinfo *bi;
 static coreid_t my_core_id;
@@ -402,14 +407,14 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             domainid_t pid    = msg.words [1];
             debug_printf_quiet ("Got AOS_RPC_GET_PROCESS_NAME  for process %u\n", pid);
 
-            if ((pid < DDB_FIXED_LENGTH) && (ddb[pid].name[0] != '\0')) {
+            if ((pid < DDB_FIXED_LENGTH) && (get_domain_info (pid) -> name[0] != '\0')) {
                 uint32_t args[8];
 
-                strcpy((char*)args, ddb[pid].name);
+                strcpy((char*)args, get_domain_info (pid) -> name);
 
                 lmp_chan_send9 (lc, 0, NULL_CAP, SYS_ERR_OK, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
             } else {
-                lmp_chan_send1 (lc, 0, NULL_CAP, -1);
+                lmp_chan_send1 (lc, 0, NULL_CAP, -1); //TODO: Error value
             }
             break;
         case AOS_RPC_GET_PROCESS_LIST:;
@@ -420,7 +425,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             idx = 0xffffffff;
 
             for (int i = msg.words [1]; (i < DDB_FIXED_LENGTH) && (args_index < 7); i++) {
-                if (ddb[i].name[0] != '\0') {
+                if (get_domain_info (pid) -> name[0] != '\0') {
                     args[args_index] = i;
                     args_index++;
                     idx  = i + 1;
@@ -438,15 +443,16 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             // TODO: error handling;
             uint32_t pid_to_kill = msg.words [1];
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
+            struct domain_info* domain = get_domain_info (pid_to_kill);
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
-            ddb [pid_to_kill].name[0] = '\0';
-            error = cap_revoke (ddb [pid_to_kill].dispatcher_frame);
-            error = cap_destroy (ddb [pid_to_kill].dispatcher_frame);
+            domain -> name[0] = '\0';
+            error = cap_revoke (domain -> dispatcher_frame);
+            error = cap_destroy (domain -> dispatcher_frame);
 
             // Notify the observer about termination.
-            if (ddb [pid_to_kill].termination_observer) {
-                lmp_chan_send1 (ddb [pid_to_kill].termination_observer, 0, NULL_CAP, SYS_ERR_OK);
-                ddb [pid_to_kill].termination_observer = NULL;
+            if (domain -> termination_observer) {
+                lmp_chan_send1 (domain -> termination_observer, 0, NULL_CAP, SYS_ERR_OK);
+                domain -> termination_observer = NULL;
             }
 
             // TODO: properly clean up processor, i.e. its full cspace.
@@ -454,11 +460,13 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
         case AOS_RPC_WAIT_FOR_TERMINATION:;
             uint32_t pid_to_wait = msg.words [1];
-            if (ddb [pid_to_wait].name[0] == '\0') {
+            struct domain_info* wait_domain = get_domain_info (pid_to_wait);
+
+            if (wait_domain -> name[0] == '\0') {
                 // Domain is already dead!
                 lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
             } else {
-                ddb [pid_to_wait].termination_observer = lc;
+                wait_domain -> termination_observer = lc;
             }
             break;
         default:
