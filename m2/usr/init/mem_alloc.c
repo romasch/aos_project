@@ -49,6 +49,7 @@ static errval_t mymm_alloc(struct capref *ret, uint8_t bits, uint64_t minbase,
 errval_t initialize_ram_alloc(void)
 {
     errval_t err;
+    struct bootinfo* bi = get_bootinfo();
 
     /* walk bootinfo looking for suitable RAM cap to use
      * we pick the first cap equal to MM_REQUIREDBITS,

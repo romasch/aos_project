@@ -97,6 +97,7 @@ static errval_t memserv_alloc(struct capref *ret, uint8_t bits, genpaddr_t minba
 errval_t initialize_mem_serv(void)
 {
     errval_t err;
+    struct bootinfo* bi = get_bootinfo();
 
     /* Step 1: Initialize slot allocator by passing a cnode cap for it to start with */
     struct capref cnode_cap;

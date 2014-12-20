@@ -25,14 +25,13 @@
 #include <aos_support/shared_buffer.h>
 #include <aos_support/module_manager.h>
 
+static struct bootinfo *bi;
+struct bootinfo* get_bootinfo (void)
+{
+    return bi;
+}
 
-
-
-
-
-struct bootinfo *bi;
 static coreid_t my_core_id;
-
 coreid_t get_core_id (void)
 {
     return my_core_id;
@@ -43,17 +42,45 @@ struct lmp_chan* services [aos_service_guard];
 
 // Keeps track of FIND_SERVICE requests.
 // TODO: use a system that supports removal as well.
-static struct lmp_chan* find_request [100];
+#define MAX_FIND_REQUESTS 100
+static struct lmp_chan* find_request [MAX_FIND_REQUESTS];
 static int find_request_index = 0;
 
 /**
  * Initialize some data structures.
  */
-static void init_data_structures (void) 
+static void init_data_structures (char *argv[])
 {
-    init_domain_manager ();
-    for (int i=0; i<aos_service_guard; i++) {
+    errval_t error = SYS_ERR_OK;
+
+    // Set the core id in the disp_priv struct
+    error = invoke_kernel_get_core_id(cap_kernel, &my_core_id);
+
+    if (err_is_fail (error)) {
+        // Bail out. We need the core ID for spawning other domains.
+        debug_printf ("Failed to get core ID: %s\n", err_getstring (error));
+        abort();
+    }
+
+    disp_set_core_id(my_core_id);
+
+    // First argument contains the bootinfo location
+    bi = (struct bootinfo*) strtol(argv[1], NULL, 10);
+
+    // Create our endpoint to self
+    error = cap_retype(cap_selfep, cap_dispatcher, ObjType_EndPoint, 0);
+    if (err_is_fail (error)) {
+        // bail out, there isn't much we can do without a self endpoint.
+        debug_printf ("Failed to create our endpoint to self: %s\n", err_getstring (error));
+        abort();
+    }
+
+    // Make sure other data structures are correctly initialized.
+    for (int i=0; i < aos_service_guard; i++) {
         services [i] = NULL;
+    }
+    for (int i=0; i < MAX_FIND_REQUESTS; i++) {
+        find_request [i] = NULL;
     }
 }
 
@@ -74,7 +101,7 @@ static void init_data_structures (void)
     return finished;
 }*/
 
-
+static bool is_spawned = false;
 
 struct remote_spawn_message {
     uintptr_t message_id                              ;
@@ -103,9 +130,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             lmp_chan_send2 (lc, 0, ram, error, bits);
 
-            //TODO: do we need to destroy ram capability here?
-//          error = cap_destroy (ram);
-
+            error = cap_destroy (ram);
             debug_printf_quiet ("Handled AOS_RPC_GET_RAM_CAP: %s\n", err_getstring (error));
             break;
         case AOS_ROUTE_REGISTER_SERVICE:;
@@ -122,9 +147,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             lmp_chan_send1 (lc, 0, device_frame, error);
 
-            //TODO: do we need to destroy frame capability here?
-//          error = cap_destroy (device_frame);
-
+            error = cap_destroy (device_frame);
             debug_printf_quiet ("Handled AOS_RPC_GET_DEVICE_FRAME: %s\n", err_getstring (error));
             break;
         case AOS_ROUTE_FIND_SERVICE:;
@@ -171,6 +194,20 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             break;
         case AOS_RPC_SPAWN_PROCESS_REMOTELY:;
+
+            // We may need to spawn the second kernel first.
+            if (get_core_id () == 0 && !is_spawned) {
+                is_spawned = true;
+                // Zero out the shared memory.
+                memset (get_cross_core_buffer(), 0, BASE_PAGE_SIZE);
+                // Spawn the core.
+                err = spawn_core (1);
+                debug_printf ("spawn_core: %s\n", err_getstring (err));
+                // For some reason we have to wait, otherwise the message gets lost.
+                for (volatile int wait = 0; wait < 5000000; wait++);
+                debug_printf_quiet ("After wait\n");
+            }
+
             struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
 
             name = (char*) &(msg.words [1]);
@@ -321,14 +358,10 @@ static struct thread* ikcsrv;
 
 int main(int argc, char *argv[])
 {
-    set_external_handler (my_handler);
+    errval_t err = SYS_ERR_OK;
 
-    errval_t err;
-
-    /* Set the core id in the disp_priv struct */
-    err = invoke_kernel_get_core_id(cap_kernel, &my_core_id);
-    assert(err_is_ok(err));
-    disp_set_core_id(my_core_id);
+    // Initialize some core data structures.
+    init_data_structures (argv);
 
     debug_printf("init: invoked as:");
     for (int i = 0; i < argc; i++) {
@@ -336,11 +369,8 @@ int main(int argc, char *argv[])
     }
     printf("\n");
 
-    debug_printf("FIRSTEP_OFFSET should be %zu + %zu\n",
-            get_dispatcher_size(), offsetof(struct lmp_endpoint, k));
+    debug_printf_quiet ("FIRSTEP_OFFSET should be %zu + %zu\n", get_dispatcher_size(), offsetof(struct lmp_endpoint, k));
 
-    // First argument contains the bootinfo location
-    bi = (struct bootinfo*)strtol(argv[1], NULL, 10);
 
     // setup memory serving
     err = initialize_ram_alloc();
@@ -348,7 +378,7 @@ int main(int argc, char *argv[])
         DEBUG_ERR(err, "Failed to init local ram allocator");
         abort();
     }
-    debug_printf("initialized local ram alloc\n");
+    debug_printf_quiet ("initialized local ram alloc\n");
 
     // setup memory serving
     err = initialize_mem_serv();
@@ -357,88 +387,73 @@ int main(int argc, char *argv[])
         abort();
     }
 
-    // Set up some data structures for RPC services.
-    init_data_structures ();
+    // Set the external handler in the server module.
+    set_external_handler (my_handler);
 
-    // Create our endpoint to self
-    err = cap_retype(cap_selfep, cap_dispatcher, ObjType_EndPoint, 0);
-    if (err_is_fail(err)) {
-        DEBUG_ERR(err, "Failed to create our endpoint to self");
-        // bail out, there isn't much we can do without a self endpoint.
-        abort();
-    }
-
-    // TODO (milestone 4): Implement a system to manage the device memory
+    // (milestone 4): Implement a system to manage the device memory
     // that's referenced by the capability in TASKCN_SLOT_IO in the task
     // cnode. Additionally, export the functionality of that system to other
     // domains by implementing the rpc call `aos_rpc_get_dev_cap()'.
     err = initialize_device_frame_server (cap_io);
 
     // Initialize the LED driver.
-    led_init ();
-    led_set_state (true);
+    err = led_init ();
+    if (err_is_ok (err)) {
+        led_set_state (true);
+    } else {
+        debug_printf ("Failed to initialize LED driver: %s\n", err_getstring (err));
+    }
+
 
     // Initialize the module manager.
     err = module_manager_init (bi);
     assert (err_is_ok (err));
 
+    // Initialize the domain manager.
+    err = init_domain_manager ();
+    assert (err_is_ok (err));
 
     // Map the shared cross core buffer into our address space.
     err = init_cross_core_buffer ();
     assert (err_is_ok (err));
 
+    if (get_core_id () != 0) {
+        // We're the second init and need to create a listener thread.
+        ikcsrv = thread_create(ikc_server, NULL);
 
-    // TODO: need special initialization for second init.
-    if (get_core_id () == 0) {
-    // Initialize the serial driver.
-        if (err_is_ok (err)) {
-    //         init_uart_driver ();
-            err = spawn ("serial_driver", NULL);
-            debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
+    } else {
+        // Initialize the serial driver.
+        err = spawn ("serial_driver", NULL);
+        if (err_is_fail (err)) {
+            debug_printf ("Error: Failed to spawn serial driver: %s\n", err_getstring (err));
+        } else {
             while (services [aos_service_serial] == NULL) {
-                event_dispatch (get_default_waitset()); 
+                event_dispatch (get_default_waitset());
             }
         }
-
-        if (err_is_ok (err)) {
-            err = spawn ("mmchs", NULL);
-            debug_printf ("Spawning filesystem driver: %s\n", err_getstring (err));
+        // Initialize the filesystem.
+        err = spawn ("mmchs", NULL);
+        if (err_is_fail (err)) {
+            debug_printf ("Error: Failed to spawn mmchs: %s\n", err_getstring (err));
+        } else {
             while (services [aos_service_filesystem] == NULL) {
                 event_dispatch (get_default_waitset());
             }
         }
-
-
-
-        if (err_is_fail (err)) {
-            debug_printf ("Failed to initialize: %s\n", err_getstring (err));
-        }
         debug_printf_quiet ("initialized core services\n");
-
-
-
-        if (get_core_id () == 0) {
-            // Zero out the shared memory.
-            memset (get_cross_core_buffer(), 0, BASE_PAGE_SIZE);
-
-            err = spawn_core(1);
-            debug_printf ("spawn_core: %s\n", err_getstring (err));
-        }
 
         // Spawn the shell.
         err = spawn ("memeater", NULL);
-    } else {
-        ikcsrv = thread_create(ikc_server, NULL);
     }
 
     // Go into messaging main loop.
-    while (true) {
+    while (err_is_ok (err)) {
         err = event_dispatch (get_default_waitset());
         if (err_is_fail (err)) {
             debug_printf ("Handling LMP message: %s\n", err_getstring (err));
         }
     }
 
-    debug_printf ("init returned.\n");
+    debug_printf ("Init returned: %s.\n", err_getstring (err));
     return EXIT_SUCCESS;
 }

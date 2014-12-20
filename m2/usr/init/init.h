@@ -21,7 +21,8 @@
 
 #include <barrelfish/aos_rpc.h>
 
-extern struct bootinfo *bi;
+// extern struct bootinfo *bi;
+struct bootinfo* get_bootinfo (void);
 coreid_t get_core_id (void);
 
 // Physical memory server functions.
