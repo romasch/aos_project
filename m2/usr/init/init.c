@@ -43,10 +43,20 @@ struct domain_info
 
 static struct domain_info ddb[DDB_FIXED_LENGTH];
 
+/**
+ * Maximum possible domain identifier.
+ */
+static uint32_t max_domain_id (void)
+{
+    return DDB_FIXED_LENGTH;
+}
+
 static struct domain_info* get_domain_info (domainid_t id)
 {
     return &(ddb[id]);
 }
+
+
 
 struct bootinfo *bi;
 static coreid_t my_core_id;
@@ -159,6 +169,42 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
     error = spawn_free(&new_domain);
 
     return error;
+}
+
+/**
+ * Spawn a new domain.
+ *
+ * \param name: The name of the binary.
+ * \param ret_id: Return parameter for the ID.
+ */
+static errval_t spawn (char* name, domainid_t* ret_id)
+{
+    errval_t error = SYS_ERR_OK;
+    uint32_t idx = -1;
+
+    // Lookup of free process slot in process database
+    for (int i = 0; (i < max_domain_id()) && (idx == -1); i++) {
+        if (ddb[i].name[0] == '\0') {
+            idx = i;
+        }
+    }
+
+    if (idx != -1) {
+        error = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
+        if (err_is_ok(error)) {
+            strncpy(ddb[idx].name, name, MAX_PROCESS_NAME_LENGTH);
+            ddb[idx].name[MAX_PROCESS_NAME_LENGTH] = '\0';
+            if (ret_id) {
+                *ret_id = idx;
+            }
+        }
+    } else {
+        // TODO: Find suitable error value.
+        error = LIB_ERR_MALLOC_FAIL;
+    }
+
+    return error;
+
 }
 
 /*static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
@@ -368,27 +414,15 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_alloc_recv_slot (lc);
             break;
         case AOS_RPC_SPAWN_PROCESS:;
-            int idx = -1;
             char* name = (char*) &(msg.words [1]);
+            debug_printf_quiet ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
 
-            //DBG: debug_printf ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
-
-            // Lookup of free process slot in process database
-            for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
-                if (ddb[i].name[0] == '\0') {
-                    idx = i;
-                }
-            }
-
-            if (idx != -1) {
-                err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
-                if (err_is_ok(err)) {
-                    strcpy(ddb[idx].name, name);
-                }
-            }
-
+            // Spawn the process.
+            domainid_t new_domain = 0;
+            err = spawn (name, &new_domain);
             // Send reply back to the client
-            lmp_chan_send2(lc, 0, NULL_CAP, err, idx);
+            lmp_chan_send2(lc, 0, NULL_CAP, err, new_domain);
+
             break;
         case AOS_RPC_SPAWN_PROCESS_REMOTELY:;
             struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
@@ -407,7 +441,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             domainid_t pid    = msg.words [1];
             debug_printf_quiet ("Got AOS_RPC_GET_PROCESS_NAME  for process %u\n", pid);
 
-            if ((pid < DDB_FIXED_LENGTH) && (get_domain_info (pid) -> name[0] != '\0')) {
+            if ((pid < max_domain_id()) && (get_domain_info (pid) -> name[0] != '\0')) {
                 uint32_t args[8];
 
                 strcpy((char*)args, get_domain_info (pid) -> name);
@@ -422,16 +456,16 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             uint32_t args[7] = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
             int args_index = 0;
 
-            idx = 0xffffffff;
+            int idx2 = 0xffffffff;
 
-            for (int i = msg.words [1]; (i < DDB_FIXED_LENGTH) && (args_index < 7); i++) {
-                if (get_domain_info (pid) -> name[0] != '\0') {
+            for (int i = msg.words [1]; (i < max_domain_id()) && (args_index < 7); i++) {
+                if (get_domain_info (i) -> name[0] != '\0') {
                     args[args_index] = i;
                     args_index++;
-                    idx  = i + 1;
+                    idx2  = i + 1;
                 }
             }
-            lmp_chan_send9 (lc, 0, NULL_CAP, SYS_ERR_OK, idx, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+            lmp_chan_send9 (lc, 0, NULL_CAP, SYS_ERR_OK, idx2, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
             break;
         case AOS_RPC_SET_LED:;
             bool state = msg.words [1];
@@ -439,9 +473,9 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
             break;
         case AOS_RPC_KILL:;
-            //DBG: Uncomment if you really need it ==> debug_printf ("Got AOS_RPC_KILL\n");
             // TODO: error handling;
             uint32_t pid_to_kill = msg.words [1];
+            debug_printf ("Got AOS_RPC_KILL: %u\n", pid_to_kill);
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
             struct domain_info* domain = get_domain_info (pid_to_kill);
             lmp_chan_send1 (lc, 0, NULL_CAP, SYS_ERR_OK);
@@ -460,6 +494,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
         case AOS_RPC_WAIT_FOR_TERMINATION:;
             uint32_t pid_to_wait = msg.words [1];
+            debug_printf ("Got AOS_RPC_WAIT_FOR_TERMINATION: %u\n", pid_to_wait);
             struct domain_info* wait_domain = get_domain_info (pid_to_wait);
 
             if (wait_domain -> name[0] == '\0') {
@@ -553,36 +588,25 @@ int ikc_server(void* data)
         case IKC_MSG_REMOTE_SPAWN:;
             err = SYS_ERR_OK;
 
-            int   idx  = -1;
             char* name = ((char*)message) + sizeof(uintptr_t);
 
 
-            for (int i = 0; (i < DDB_FIXED_LENGTH) && (idx == -1); i++) {
-                if (ddb[i].name[0] == '\0') {
-                    idx = i;
-                }
-            }
+
 
             // Fix the name by removing whitespaces and newlines.
-            for (int i = 0; i < DDB_FIXED_LENGTH; i++) {
+            for (int i = 0; i < MAX_PROCESS_NAME_LENGTH; i++) {
                 char c = name [i];
                 if (c == ' ' || c=='\n' || c == '\r') {
                     name [i] = '\0';
                 }
             }
 
-
             for (volatile int wait=0; wait<1000000;wait++);
             debug_printf (name);
             for (volatile int wait=0; wait<1000000;wait++);
 
+            err = spawn (name, NULL);
 
-            if (idx != -1) {
-                err = spawn_with_channel (name, idx, &ddb[idx].dispatcher_frame, &ddb[idx].channel);
-                if (err_is_ok(err)) {
-                    strcpy(ddb[idx].name, name);
-                }
-            }
             push_ikc_message(&err, sizeof(err));
             break;
         default:;
