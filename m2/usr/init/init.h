@@ -17,11 +17,9 @@
 
 #include <stdio.h>
 #include <barrelfish/barrelfish.h>
-#include <spawndomain/spawndomain.h>
 
 #include <barrelfish/aos_rpc.h>
 
-// extern struct bootinfo *bi;
 struct bootinfo* get_bootinfo (void);
 coreid_t get_core_id (void);
 

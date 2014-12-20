@@ -1,6 +1,7 @@
 #include "init.h"
 
 #include <barrelfish/dispatcher_arch.h>
+#include <spawndomain/spawndomain.h>
 
 #include <aos_support/module_manager.h>
 #include <aos_support/server.h>
