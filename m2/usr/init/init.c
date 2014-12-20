@@ -692,21 +692,17 @@ int main(int argc, char *argv[])
     // TODO: need special initialization for second init.
     if (my_core_id == 0) {
     // Initialize the serial driver.
-        struct lmp_chan* serial_chan;
         if (err_is_ok (err)) {
     //         init_uart_driver ();
-            strcpy(ddb[2].name, "serial_driver");
-            err = spawn_with_channel ("serial_driver", 2, &(ddb[2].dispatcher_frame), &serial_chan);
+            err = spawn ("serial_driver", NULL);
             debug_printf ("Spawning serial driver: %s\n", err_getstring (err));
             while (services [aos_service_serial] == NULL) {
                 event_dispatch (get_default_waitset()); 
             }
         }
 
-        struct lmp_chan* filesystem_chan;
         if (err_is_ok (err)) {
-            strcpy(ddb[3].name, "mmchs");
-            err = spawn_with_channel ("mmchs", 3, &(ddb[3].dispatcher_frame), &filesystem_chan);
+            err = spawn ("mmchs", NULL);
             debug_printf ("Spawning filesystem driver: %s\n", err_getstring (err));
             while (services [aos_service_filesystem] == NULL) {
                 event_dispatch (get_default_waitset());
@@ -731,9 +727,7 @@ int main(int argc, char *argv[])
         }
 
         // Spawn the shell.
-        struct lmp_chan* memeater_chan;
-        strcpy(ddb[1].name, "memeater");
-        spawn_with_channel ("memeater",  1, &(ddb[1].dispatcher_frame), &memeater_chan);
+        err = spawn ("memeater", NULL);
     } else {
         ikcsrv = thread_create(ikc_server, NULL);
     }
