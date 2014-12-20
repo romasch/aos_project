@@ -297,64 +297,16 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
 
     // Enforce page alignment restriction.
     assert ((base_addr & (PAGE_SIZE-1)) == 0);
-
-
     errval_t error = SYS_ERR_OK;
-
 
     // First ask for a frame of correct size.
     size_t requested_size = page_count * PAGE_SIZE;
     struct capref new_frame;
     error = frame_alloc(&new_frame, requested_size, NULL);
 
-    uint32_t remaining_pages = page_count;
-    lvaddr_t mapped_addr = base_addr;
-
-    // Offset at which a frame should be mapped. Usually zero, but
-    // when multiple page tables are needed it may be different.
-    uint32_t frame_offset = (page_count - remaining_pages) * PAGE_SIZE;
-
-    while (remaining_pages > 0 && err_is_ok (error)) {
-
-        // Now map all pages to the correct second-level page table.
-        int l1_index = ARM_L1_USER_OFFSET (mapped_addr);
-        int l2_index = ARM_L2_USER_OFFSET (mapped_addr);
-
-        // Allocate a second-level page table if necessary.
-        if ( ! state->ptables [l1_index] ) {
-            error = paging_allocate_ptable (state, l1_index);
-        }
-
-        if (err_is_ok (error)) {
-
-            // Get the capability for the second-level page table.
-            struct capref cap_l2 = state -> ptables [l1_index] -> lvl2_cap;
-
-            // Figure out how many page table entries are still free.
-            uint32_t free_slots = ARM_L2_USER_ENTRIES - l2_index;
-
-            if (free_slots <= remaining_pages) {
-                debug_printf_quiet ("paging_map_eagerly: page region spans over multiple ptables\n");
-                // ouch, need to allocate another page table...
-                // Map at least part of it.
-                struct capref copied_frame;
-                slot_alloc (&copied_frame);
-                error = cap_copy (copied_frame, new_frame);
-
-                if (err_is_ok (error)) {
-                    error = vnode_map (cap_l2, copied_frame, l2_index, FLAGS, frame_offset, free_slots);
-                    remaining_pages -= free_slots;
-                    mapped_addr += free_slots * PAGE_SIZE;
-                } else {
-                    cap_destroy (copied_frame);
-                }
-            } else {
-                // Everything fits into the current page table.
-                // Map it to the specified addresses.
-                error = vnode_map (cap_l2, new_frame, l2_index, FLAGS, frame_offset, remaining_pages);
-                remaining_pages = 0;
-            }
-        }
+    if (err_is_ok (error)) {
+        // We can use paging_map_frame_attr now. It does the same job as paging_map_eagerly did earlier.
+        error = paging_map_fixed_attr (state, base_addr, new_frame, requested_size, FLAGS);
     }
 
     if (err_is_fail (error)) {
@@ -362,7 +314,6 @@ static errval_t paging_map_eagerly (struct paging_state* state, lvaddr_t base_ad
         // Return frame cap and report error.
         cap_destroy (new_frame);
     }
-
     PRINT_EXIT (error);
     return error;
 }
@@ -620,8 +571,6 @@ errval_t paging_map_frame_attr(struct paging_state *st, void **buf,
 errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
         struct capref frame, size_t bytes, int flags)
 {
-    // TODO: Check if we can merge paging_map_eagerly with this function.
-
     // from handout: you will need this functionality in later assignments. Try to
     // keep this in mind when designing your self-paging system.
 
@@ -688,13 +637,6 @@ errval_t paging_map_fixed_attr(struct paging_state *state, lvaddr_t vaddr,
             }
         }
     }
-
-//     if (err_is_fail (error)) {
-//         // Mapping or allocation failed!
-//         // Return frame cap and report error.
-//         cap_destroy (new_frame);
-//     }
-//     debug_printf ("paging :: %s\n", err_getstring (error));
     PRINT_EXIT (error);
     return error;
 }
