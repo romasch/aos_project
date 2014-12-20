@@ -19,7 +19,10 @@
 #include <barrelfish/barrelfish.h>
 #include <spawndomain/spawndomain.h>
 
+#include <barrelfish/aos_rpc.h>
+
 extern struct bootinfo *bi;
+coreid_t get_core_id (void);
 
 // Physical memory server functions.
 errval_t initialize_ram_alloc(void);
@@ -28,6 +31,24 @@ errval_t initialize_mem_serv(void);
 // Device frame server functions.
 errval_t initialize_device_frame_server (struct capref io_space_cap);
 errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struct capref* ret_frame);
+
+// Process management:
+struct domain_info
+{
+    char name[MAX_PROCESS_NAME_LENGTH + 1]; // TODO: Can we lift this restriction, or cut dependency to RPC mechanism?
+    struct capref dispatcher_frame;
+    bool exists; // TODO: Use this instead of the name.
+    // Initial connection to domain.
+    // NOTE: Malloced and owned by this struct, needs to be freed.
+    struct lmp_chan* channel;
+    // Possible observer for termination events.
+    // NOTE: Not owned, do not free!
+    struct lmp_chan* termination_observer;
+};
+errval_t init_domain_manager (void);
+uint32_t max_domain_id (void);
+struct domain_info* get_domain_info (domainid_t id);
+errval_t spawn (char* name, domainid_t* ret_id);
 
 // Cross core setup:
 errval_t init_cross_core_buffer (void);
