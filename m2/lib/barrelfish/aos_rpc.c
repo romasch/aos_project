@@ -154,22 +154,22 @@ static errval_t aos_send_receive (struct lmp_message_args* storage, bool needs_r
     return error;
 }
 
-static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
-{
-    finished = false;
-
-    for (int i = 0; (i < args_length) && (finished == false); i++) {
-        for (int j = 0; (j < 4) && (finished == false); j++, (*indx)++) {
-            args[i] |= (uint32_t)(string[*indx]) << (8 * j);
-
-            if ((string[*indx] == '\0') && (finished == false)) {
-                finished = true;
-            }
-        }
-    }
-
-    return finished;
-}
+// static bool str_to_args(const char* string, uint32_t* args, size_t args_length, int* indx, bool finished)
+// {
+//     finished = false;
+//
+//     for (int i = 0; (i < args_length) && (finished == false); i++) {
+//         for (int j = 0; (j < 4) && (finished == false); j++, (*indx)++) {
+//             args[i] |= (uint32_t)(string[*indx]) << (8 * j);
+//
+//             if ((string[*indx] == '\0') && (finished == false)) {
+//                 finished = true;
+//             }
+//         }
+//     }
+//
+//     return finished;
+// }
 
 errval_t aos_rpc_send_string(struct aos_rpc *chan, const char *string)
 {
@@ -341,81 +341,52 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c)
 
 errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *newpid)
 {
-    // Request a creation of new process from the binary packed into boot image.
-    errval_t error = -1; // Consider -1 as a sign of general error
-
-    if ((chan != NULL) && (name != NULL) && (newpid != NULL)) {
-        if (strlen(name) <= MAX_PROCESS_NAME_LENGTH) {
-            struct lmp_message_args  args   ;
-            struct lmp_chan        * channel = &chan->channel;
-
-            int indx = 0;
-    
-            init_lmp_message_args (&args, channel);
-
-            args.message.words [0] = AOS_RPC_SPAWN_PROCESS;
-
-            str_to_args(&name[indx], &args.message.words[1], 8, &indx, false);
-            
-            // Do the IPC call.
-            error = aos_send_receive(&args, true);
-            print_error (error, "aos_rpc_process_spawn: communication failed. %s\n", err_getstring (error));
-
-            // Get the result.
-            if (err_is_ok (error)) {
-
-                error = args.message.words [0];
-                print_error (error, "aos_rpc_process_spawn: operation failed. %s\n", err_getstring (error));
-
-                if (err_is_ok (error)) {
-                    *newpid = args.message.words [1];
-                }
-            }
-        }
-    }
-
-    return error;
+    return aos_rpc_process_spawn_remotely (chan, name, 0, newpid);
 }
 
 errval_t aos_rpc_process_spawn_remotely(struct aos_rpc *chan, char *name, coreid_t core_id, domainid_t *newpid)
 {
-    // Lets assume that we have only two cores. 
-    // We ignore third parameter "core id" in pass request to the opposite core.
-    core_id = 0;
+    // Spawn a new process on core 'core_id'.
+    errval_t error = SYS_ERR_OK;
 
-    // Request a creation of new process from the binary packed into boot image.
-    errval_t error = -1; // Consider -1 as a sign of general error
-
-    if ((chan != NULL) && (name != NULL) && (newpid != NULL)) {
-        if (strlen(name) <= MAX_PROCESS_NAME_LENGTH) {
-            struct lmp_message_args  args   ;
-            struct lmp_chan        * channel = &chan->channel;
-
-            int indx = 0;
-    
-            init_lmp_message_args (&args, channel);
-
-            args.message.words [0] = AOS_RPC_SPAWN_PROCESS_REMOTELY;
-
-            str_to_args(&name[indx], &args.message.words[1], 8, &indx, false);
-            
-            // Do the IPC call.
-            error = aos_send_receive(&args, true);
-            print_error (error, "aos_rpc_process_spawn_remotely: communication failed. %s\n", err_getstring (error));
-
-            // Get the result.
-            if (err_is_ok (error)) {
-
-                error = args.message.words [0];
-                print_error (error, "aos_rpc_process_spawn_remotely: operation failed. %s\n", err_getstring (error));
-
-                if (err_is_ok (error)) {
-                    *newpid = args.message.words [1];
-                }
-            }
-        }
+    if (chan && chan -> shared_buffer == NULL) {
+        error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
+        debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
     }
 
+    assert (chan -> shared_buffer != NULL);
+    assert (chan -> shared_buffer_length != 0);
+
+    if (chan && err_is_ok (error)) {
+        // TODO: Gracefully handle this assertion.
+        assert (strlen (name) <= chan->shared_buffer_length);
+
+        // Put the string into the shared buffer.
+        char* as_string_buffer = chan -> shared_buffer;
+        strncpy (as_string_buffer, name, chan -> shared_buffer_length);
+
+        struct lmp_message_args args;
+        init_lmp_message_args (&args, &(chan->channel));
+
+        // Set up the send arguments.
+        args.message.words [0] = AOS_RPC_SPAWN_DOMAIN;
+        args.message.words [1] = chan -> memory_descriptor;
+        args.message.words [2] = core_id;
+
+        // Do the IPC call.
+        error = aos_send_receive (&args, false);
+        print_error (error, "aos_rpc_send_string: communication failed. %s\n", err_getstring (error));
+
+        // Get the result.
+        if (err_is_ok (error)) {
+            error = args.message.words [0];
+            if (err_is_ok (error) && newpid) {
+                *newpid = args.message.words [1];
+            }
+        }
+    } else {
+        error = SYS_ERR_INVARGS_SYSCALL;
+    }
     return error;
 }
 

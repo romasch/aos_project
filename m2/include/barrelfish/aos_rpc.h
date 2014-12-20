@@ -180,7 +180,7 @@ enum aos_service {
  * Receive Args: error value and pid of the created process.
  * Receive Capability: -
  */
-#define AOS_RPC_SPAWN_PROCESS 10
+// #define AOS_RPC_SPAWN_PROCESS 10
 
 /**
  * Request for the process name.
@@ -279,7 +279,7 @@ enum aos_service {
  * Receive Args: error value and pid of the created process.
  * Receive Capability: -
  */
-#define AOS_RPC_SPAWN_PROCESS_REMOTELY 18
+// #define AOS_RPC_SPAWN_PROCESS_REMOTELY 18
 
 /**
  * Open file on the removable storage.
@@ -377,15 +377,24 @@ enum aos_service {
  */
 #define AOS_RPC_READ_DIR_NEW 26
 
-
+/**
+ * Spawn a new domain
+ *
+ * Type: Synchronous
+ * Target: Process manager (init)
+ * Send Arguments: Memory descriptor, Core ID
+ * Send Buffer: Process Name
+ * Send Capability: -
+ * Receive Arguments: Error value, PID of process (if not remote).
+ * Receive Capability: -
+ */
+#define AOS_RPC_SPAWN_DOMAIN 27
 
 struct aos_rpc {
     uint32_t memory_descriptor;
     void* shared_buffer;
     uint32_t shared_buffer_length;
     struct lmp_chan channel;
-    // TODO: add state for your implementation
-
 };
 
 /// The global init channel.

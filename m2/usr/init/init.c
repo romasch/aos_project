@@ -102,11 +102,48 @@ static void init_data_structures (char *argv[])
 }*/
 
 static bool is_spawned = false;
-
 struct remote_spawn_message {
     uintptr_t message_id                              ;
     char      name      [64U - 2U * sizeof(uintptr_t)];
 };
+
+// Spawn on the second core.
+static errval_t spawn_remotely (char* domain_name, coreid_t core_id)
+{
+    errval_t error = SYS_ERR_OK;
+    // Currently this function is only supported on init.0
+    assert (get_core_id () == 0);
+
+    if (core_id == 1) {
+
+        // We may need to spawn the second kernel first.
+        if (get_core_id () == 0 && !is_spawned) {
+            is_spawned = true;
+            // Zero out the shared memory.
+            memset (get_cross_core_buffer(), 0, BASE_PAGE_SIZE);
+            // Spawn the core.
+            error = spawn_core (core_id);
+            debug_printf ("spawn_core: %s\n", err_getstring (error));
+            // For some reason we have to wait, otherwise the message gets lost.
+            for (volatile int wait = 0; wait < 5000000; wait++);
+            debug_printf_quiet ("After wait\n");
+        }
+
+        struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
+
+        strcpy(rsm.name, domain_name);
+
+        void* reply_error = ikc_rpc_call(&rsm, sizeof(rsm));
+        error = *(errval_t*) reply_error;
+    } else {
+        // Invalid remote core ID.
+        error = SYS_ERR_CORE_NOT_FOUND;
+    }
+
+    return error;
+}
+
+
 
 /**
  * The main receive handler for init.
@@ -182,43 +219,25 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_set_recv_slot (lc, cap);
             lmp_chan_alloc_recv_slot (lc);
             break;
-        case AOS_RPC_SPAWN_PROCESS:;
-            char* name = (char*) &(msg.words [1]);
-            debug_printf_quiet ("Got AOS_RPC_SPAWN_PROCESS <- %s\n", name);
+        case AOS_RPC_SPAWN_DOMAIN:;
+            uint32_t mem_desc = msg.words [1];
+            coreid_t core_id = msg.words [2];
+            debug_printf_quiet ("AOS_RPC_SPAWN_DOMAIN on core %u\n", core_id);
+            domainid_t new_domain_id = -1;
 
-            // Spawn the process.
-            domainid_t new_domain = 0;
-            err = spawn (name, &new_domain);
-            // Send reply back to the client
-            lmp_chan_send2(lc, 0, NULL_CAP, err, new_domain);
+            void* domain_name = NULL;
+            err = get_shared_buffer (mem_desc, &domain_name, NULL);
 
-            break;
-        case AOS_RPC_SPAWN_PROCESS_REMOTELY:;
-
-            // We may need to spawn the second kernel first.
-            if (get_core_id () == 0 && !is_spawned) {
-                is_spawned = true;
-                // Zero out the shared memory.
-                memset (get_cross_core_buffer(), 0, BASE_PAGE_SIZE);
-                // Spawn the core.
-                err = spawn_core (1);
-                debug_printf ("spawn_core: %s\n", err_getstring (err));
-                // For some reason we have to wait, otherwise the message gets lost.
-                for (volatile int wait = 0; wait < 5000000; wait++);
-                debug_printf_quiet ("After wait\n");
+            if (err_is_ok (err)) {
+                if (core_id == get_core_id()) {
+                    // We can spawn locally.
+                    err = spawn (domain_name, &new_domain_id);
+                } else {
+                    err = spawn_remotely (domain_name, core_id);
+                }
             }
-
-            struct remote_spawn_message rsm = { .message_id = IKC_MSG_REMOTE_SPAWN };
-
-            name = (char*) &(msg.words [1]);
-            
-            strcpy(rsm.name, name);
-            
-            void* reply = ikc_rpc_call(&rsm, sizeof(rsm));
-
-            debug_printf ("AOS_RPC_SPAWN_PROCESS_REMOTELY\n");
-
-            lmp_chan_send1(lc, 0, NULL_CAP, *(errval_t*)reply);
+            // Send reply back to the client
+            lmp_chan_send2(lc, 0, NULL_CAP, err, new_domain_id);
             break;
         case AOS_RPC_GET_PROCESS_NAME:;
             domainid_t pid    = msg.words [1];
@@ -353,8 +372,6 @@ static errval_t initep_setup (void)
 
 __attribute__((unused))
 static struct thread* ikcsrv;
-
-
 
 int main(int argc, char *argv[])
 {
