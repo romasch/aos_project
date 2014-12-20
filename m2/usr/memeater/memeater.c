@@ -95,7 +95,7 @@ static void execute_external_command(char* const cmd)
         }
     }
     
-    err = aos_rpc_process_spawn(pm_channel, cmd, &pid);
+    err = aos_rpc_process_spawn (pm_channel, cmd, 0, &pid);
     success = err_is_ok (err);
 
     if (!background && success) { // not background
@@ -133,7 +133,7 @@ static void execute_remotely(char* command)
     } else {
         domainid_t newpid;
 
-        aos_rpc_process_spawn_remotely(pm_channel, command, core, &newpid);
+        aos_rpc_process_spawn (pm_channel, command, core, &newpid);
     }
 }
 
@@ -456,7 +456,7 @@ static void test_process_api (void)
     domainid_t  pid  ;
     domainid_t* pids ;
 
-    error = aos_rpc_process_spawn(pm_channel, "test_domain", &pid);
+    error = aos_rpc_process_spawn(pm_channel, "test_domain", 0, &pid);
     if (err_is_fail (error)) {
         debug_printf ("\t\t (X) AOS_RPC_SPAWN_PROCESS   \n");
     } else {

@@ -1,6 +1,7 @@
 #include <aos_support/module_manager.h>
 
 #include <spawndomain/spawndomain.h>
+#include <barrelfish/aos_dbg.h>
 
 // Initial length of module cache
 #define MODULE_CACHE_CAPACITY 32
@@ -115,7 +116,7 @@ errval_t module_manager_load (char* domain_name, struct module_info** ret_module
                 error = LIB_ERR_MALLOC_FAIL;
             }
         } else {
-            debug_printf("could not find module [%s] in multiboot image\n", prefixed_name);
+            debug_printf_quiet("could not find module [%s] in multiboot image\n", prefixed_name);
             error = SPAWN_ERR_FIND_MODULE;
         }
     }

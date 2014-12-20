@@ -439,16 +439,16 @@ errval_t aos_rpc_get_dev_cap(struct aos_rpc *chan, lpaddr_t paddr,
                              size_t length, struct capref *retcap,
                              size_t *retlen);
 
-/* ----------------------------------------------------------------------------------*/
-/* ---------------------- PROCESS MANAGEMENT ----------------------------------------*/
-/* ----------------------------------------------------------------------------------*/
 /**
  * \brief Request process manager to start a new process
  * \arg name the name of the process that needs to be spawned (without a path prefix)
  * \arg newpid the process id of the newly spawned process
  */
-errval_t aos_rpc_process_spawn         (struct aos_rpc *chan, char *name,                domainid_t *newpid);
-errval_t aos_rpc_process_spawn_remotely(struct aos_rpc *chan, char *name, coreid_t core, domainid_t *newpid);
+errval_t aos_rpc_process_spawn (struct aos_rpc *chan,
+                                char *name,
+                                coreid_t core,
+                                domainid_t *newpid);
+
 /**
  * \brief Get name of process with id pid.
  * \arg pid the process id to lookup

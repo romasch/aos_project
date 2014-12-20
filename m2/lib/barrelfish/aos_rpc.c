@@ -339,12 +339,7 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *chan, char c)
     return SYS_ERR_OK;
 }
 
-errval_t aos_rpc_process_spawn(struct aos_rpc *chan, char *name, domainid_t *newpid)
-{
-    return aos_rpc_process_spawn_remotely (chan, name, 0, newpid);
-}
-
-errval_t aos_rpc_process_spawn_remotely(struct aos_rpc *chan, char *name, coreid_t core_id, domainid_t *newpid)
+errval_t aos_rpc_process_spawn (struct aos_rpc *chan, char *name, coreid_t core_id, domainid_t *newpid)
 {
     // Spawn a new process on core 'core_id'.
     errval_t error = SYS_ERR_OK;
