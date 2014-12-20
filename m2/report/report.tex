@@ -270,7 +270,7 @@ Within this function there's no magic going on - it just writes the start addres
 The real magic happens in \lstinline!arch_init! in \filepath{kernel/arch/omap44xx/init.c} and  \lstinline{arm_kernel_startup} in \filepath{kernel/arch/omap44xx/startup\_arch.c}.
 In \lstinline!arch_init! we set up the \lstinline!global! struct which contains data to be shared between both kernels.
 Among the data shared between the two kernels is the multiboot image.
-We also reserve a region of physical addresses as a buffer for future cross core communication and store the physical address and size of it in the \lstinline!global! struct.
+We also reserve a region of physical memory as a buffer for future cross core communication and store the physical address and size of it in the \lstinline!global! struct.
 
 In \lstinline!arm_kernel_startup! we do a static split of the available physical memory.
 Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.

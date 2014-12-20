@@ -207,10 +207,8 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             struct lmp_chan* recv = find_request [id]; // TODO: delete id
             // generate response with cap and error value
             lmp_chan_send1 (recv, 0, cap, error_ret);
-            // Delete cap and reuse slot
-            error = cap_delete (cap);
-            lmp_chan_set_recv_slot (channel, cap);
-            lmp_chan_alloc_recv_slot (channel);
+            // Delete capability and reuse slot.
+            error = cap_destroy (cap);
             break;
         case AOS_RPC_SPAWN_DOMAIN:;
             uint32_t mem_desc = message -> words [1];
@@ -274,6 +272,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
             struct domain_info* domain = get_domain_info (pid_to_kill);
             lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
+
             domain -> name[0] = '\0';
             error = cap_revoke (domain -> dispatcher_frame);
             error = cap_destroy (domain -> dispatcher_frame);
