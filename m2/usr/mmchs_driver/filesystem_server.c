@@ -6,9 +6,12 @@
 #include <aos_support/server.h>
 #include <aos_support/shared_buffer.h>
 #include <barrelfish/aos_dbg.h>
-    
+
 static const uint32_t MBR_SECTOR_IDX = 0U; // MBR is always first sector
-    
+
+static struct fat32_config my_config;
+
+
 static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, struct capref capability, uint32_t message_type)
 {
     //uint32_t did   = message->words[1]; TODO: introduce inter-process isolation on files.
@@ -20,7 +23,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                 uint32_t  file_descriptor;
                 char    * path            = (char*)(&message->words[2]);
 
-                error = fat32_open_file(path, &file_descriptor);
+                error = fat32_open_file(&my_config, path, &file_descriptor);
 
                 lmp_chan_send2(channel, 0, NULL_CAP, error, file_descriptor);
             }
@@ -34,7 +37,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             struct aos_dirent* entries;
             size_t count = 0;
-            error = fat32_read_directory((char*) buffer, &entries, &count);
+            error = fat32_read_directory(&my_config, (char*) buffer, &entries, &count);
             if (err_is_ok (error)) {
                 memcpy (buffer, entries, count * sizeof (struct aos_dirent));
                 free (entries);
@@ -111,7 +114,6 @@ static uint32_t parse_master_boot_record (sector_read_function_t read_function)
     return partition_start_sector;
 }
 
-static struct fat32_config my_config;
 
 errval_t start_filesystem_server (void)
 {

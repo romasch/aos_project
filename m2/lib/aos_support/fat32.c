@@ -43,27 +43,29 @@ static inline uint32_t get_int (void* buffer, uint32_t offset)
     return ((uint32_t*) buffer) [offset >> 2];
 }
 
-static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
+// static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
 static uint32_t fat32_fat_start;
 
-static uint32_t fat32_cluster_start;
-static uint32_t fat32_sectors_per_cluster;
+// static uint32_t fat32_cluster_start;
+// static uint32_t fat32_sectors_per_cluster;
 
-static uint32_t root_directory_cluster;
+// static uint32_t root_directory_cluster;
 
-static uint32_t cluster_to_sector_number (uint32_t cluster_index)
-{
-    return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
-}
+// static uint32_t cluster_to_sector_number (uint32_t cluster_index)
+// {
+//     return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
+// }
 
 struct sector_stream {
+    struct fat32_config* config;
     uint32_t cluster_start;
     uint32_t current_cluster;
     uint32_t sector_index;
 };
 
-static void stream_init (struct sector_stream* stream, uint32_t a_cluster_start)
+static void stream_init (struct sector_stream* stream, struct fat32_config* conf, uint32_t a_cluster_start)
 {
+    stream -> config = conf;
     stream -> cluster_start = a_cluster_start;
     stream -> current_cluster= a_cluster_start;
     stream -> sector_index = 0;
@@ -82,7 +84,8 @@ static errval_t stream_next (struct sector_stream* stream)
 {
     stream -> sector_index++;
 
-    if (stream -> sector_index == fat32_sectors_per_cluster) {
+//     if (stream -> sector_index == fat32_sectors_per_cluster) {
+    if (stream -> sector_index == stream -> config -> sectors_per_cluster) {
         stream -> sector_index = 0;
         stream -> current_cluster = fat_lookup (stream -> current_cluster);
     }
@@ -91,7 +94,14 @@ static errval_t stream_next (struct sector_stream* stream)
 
 static errval_t stream_load (struct sector_stream* stream, void* buffer)
 {
-    uint32_t sector_to_read = cluster_to_sector_number (stream -> current_cluster);
+    struct fat32_config* conf = stream -> config;
+
+    // Calculate sector index from cluster index.
+    uint32_t sector_to_read = conf -> cluster_sector_begin;
+    sector_to_read  += ((stream -> current_cluster) - 2) * (conf -> sectors_per_cluster);
+//     uint32_t sector_to_read = cluster_to_sector_number (stream -> current_cluster);
+
+
     sector_to_read = sector_to_read + stream -> sector_index;
     errval_t error = fat32_driver_read_sector (sector_to_read, buffer);
     return error;
@@ -134,7 +144,7 @@ static uint32_t fat_lookup (uint32_t cluster_index)
 
 
 // errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
-static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size)
+static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
     debug_printf_quiet ("Find node %s\n", path);
 
@@ -143,7 +153,8 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
     bool end_of_path = false;
     bool found_entry = false;
 
-    uint32_t cluster_index = root_directory_cluster;
+//     uint32_t cluster_index = root_directory_cluster;
+    uint32_t cluster_index = config -> root_directory_cluster;
     uint32_t file_size = 0;
 
     //TODO: Hack for root directory.
@@ -194,7 +205,7 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
 
             struct sector_stream stack_stream;
             struct sector_stream* stream = &stack_stream;
-            stream_init (stream, cluster_index);
+            stream_init (stream, config, cluster_index);
             char sector [512];
             bool early_stop = false;
 
@@ -269,11 +280,12 @@ static errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* re
     return error;
 }
 
+struct fat32_config* descriptor_to_config [1024];
 static uint32_t descriptor_to_size [1024];
 static uint32_t descriptor_to_cluster [1024];
 static uint32_t descriptor_count = 0;
 
-errval_t fat32_open_file (char* path, uint32_t* file_descriptor)
+errval_t fat32_open_file (struct fat32_config* config, char* path, uint32_t* file_descriptor)
 {
     assert (path != NULL && file_descriptor != NULL);
     assert (descriptor_count < 1024); // TODO: A dynamic structure.
@@ -282,9 +294,10 @@ errval_t fat32_open_file (char* path, uint32_t* file_descriptor)
     uint32_t ret_size = 0;
     errval_t error = SYS_ERR_OK;
 
-    error = fat32_find_node (path, &ret_cluster, &ret_size);
+    error = fat32_find_node (config, path, &ret_cluster, &ret_size);
 
     if (err_is_ok (error)) {
+        descriptor_to_config [descriptor_count] = config;
         descriptor_to_cluster [descriptor_count] = ret_cluster;
         descriptor_to_size [descriptor_count] = ret_size;
         *file_descriptor = descriptor_count;
@@ -319,7 +332,7 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
     errval_t error = SYS_ERR_OK;
     struct sector_stream stack_stream;
     struct sector_stream* stream = &stack_stream;
-    stream_init (stream, cluster_index);
+    stream_init (stream, descriptor_to_config [file_descriptor], cluster_index);
     uint32_t early_stop = false;
     char sector [512];
 
@@ -354,13 +367,13 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 }
 
 
-errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count)
+errval_t fat32_read_directory (struct fat32_config* config, char* path, struct aos_dirent** entry_list, size_t* entry_count)
 {
     uint32_t cluster_index = 0;
     uint32_t ret_size;
     struct aos_dirent new_entry;
 
-    errval_t error = fat32_find_node (path, &cluster_index, &ret_size);
+    errval_t error = fat32_find_node (config, path, &cluster_index, &ret_size);
 
     // Check that it's a directory.
     if (ret_size != 0) {
@@ -374,7 +387,7 @@ errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_
 
     struct sector_stream stack_stream;
     struct sector_stream* stream = &stack_stream;
-    stream_init (stream, cluster_index);
+    stream_init (stream, config, cluster_index);
     uint32_t early_stop = false;
     char sector [512];
 
@@ -518,7 +531,7 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
 
     // Read the first block from sector.
     // NOTE: When using partition tables we'll have to change this constant.
-    fat32_volumeid_block = fat32_pbb;
+    uint32_t fat32_volumeid_block = fat32_pbb;
     uint8_t* volume_id_sector [512];
     error = fat32_driver_read_sector (fat32_volumeid_block, volume_id_sector);
 
@@ -529,7 +542,7 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
 
         // Read the amount of sectors per cluster.
         // Should be 8 according to the formatting command.
-        fat32_sectors_per_cluster = get_char (volume_id_sector, sectors_per_cluster_offset);
+        uint32_t fat32_sectors_per_cluster = get_char (volume_id_sector, sectors_per_cluster_offset);
         assert (fat32_sectors_per_cluster == 8);
 
         config -> sectors_per_cluster = fat32_sectors_per_cluster;
@@ -553,13 +566,13 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
         assert (fat_count == 2);
 
         // Now we can get the sector index of the first cluster in the file system.
-        fat32_cluster_start = fat32_fat_start + (fat_count * sectors_per_fat);
+        uint32_t fat32_cluster_start = fat32_fat_start + (fat_count * sectors_per_fat);
 
 
         config -> cluster_sector_begin = fat32_cluster_start;
 
         // Read the first cluster number of the root directory.
-        root_directory_cluster = get_int (volume_id_sector, root_dir_cluster_offset);
+        uint32_t root_directory_cluster = get_int (volume_id_sector, root_dir_cluster_offset);
         if (root_directory_cluster != 2) {
             // The code should work for a root directory cluster other than two, but we never tested this.
             debug_printf ("Warning! Root directory cluster number in FAT filesystem is %u\n", root_directory_cluster);
@@ -570,7 +583,7 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
     return error;
 }
 
-
+/*
 void test_fs (void)
 {
     /////// Read the first block
@@ -617,4 +630,4 @@ void test_fs (void)
     }
 
     debug_printf_quiet ("Finished tests\n");
-}
+}//*/

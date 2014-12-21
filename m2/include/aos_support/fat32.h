@@ -42,12 +42,13 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
 /**
  * Open the specified file.
  *
+ * \param config: FAT filesystem data.
  * \param path: The path to the file.
  * \param file_descriptor: Storage for the file descriptor.
  *
  * NOTE: The path format is UNIX style, i.e. /a/b/c.txt
  */
-errval_t fat32_open_file (char* path, uint32_t* file_descriptor);
+errval_t fat32_open_file (struct fat32_config* config, char* path, uint32_t* file_descriptor);
 
 /**
  * Close the specified file.
@@ -72,6 +73,7 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 /**
  * Read the contents of a directory.
  *
+ * \param config: FAT filesystem data.
  * \param path: The path to the directory.
  * \param entry_list: Result parameter for the array containing entry descriptors.
  * \param entry_count: Result parameter for the directory entry count.
@@ -81,7 +83,7 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
  * NOTE: In case of success "entry_list" is allocated by this function.
  * It is the callers responsibility to free it afterwards.
  */
-errval_t fat32_read_directory (char* path, struct aos_dirent** entry_list, size_t* entry_count);
+errval_t fat32_read_directory (struct fat32_config* config, char* path, struct aos_dirent** entry_list, size_t* entry_count);
 
 /// Some test features.
 void test_fs (void);
