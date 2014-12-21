@@ -11,7 +11,7 @@
 #define DIRECTORY_ENTRIES 16
 
 //The function to read a sector.
-static sector_read_function_t fat32_driver_read_sector;
+// static sector_read_function_t fat32_driver_read_sector;
 
 // Offsets to values in root cluster.
 // NOTE: ARM requires 4-byte aligned addresses.
@@ -44,7 +44,7 @@ static inline uint32_t get_int (void* buffer, uint32_t offset)
 }
 
 // static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
-static uint32_t fat32_fat_start;
+// static uint32_t fat32_fat_start;
 
 // static uint32_t fat32_cluster_start;
 // static uint32_t fat32_sectors_per_cluster;
@@ -73,7 +73,7 @@ static void stream_init (struct sector_stream* stream, struct fat32_config* conf
 
 
 // Forward declaration.
-static uint32_t fat_lookup (uint32_t cluster_index);
+static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index, uint32_t* result_sector);
 
 static bool stream_is_finished (struct sector_stream* stream)
 {
@@ -82,12 +82,16 @@ static bool stream_is_finished (struct sector_stream* stream)
 
 static errval_t stream_next (struct sector_stream* stream)
 {
+    errval_t error = SYS_ERR_OK;
     stream -> sector_index++;
 
 //     if (stream -> sector_index == fat32_sectors_per_cluster) {
     if (stream -> sector_index == stream -> config -> sectors_per_cluster) {
         stream -> sector_index = 0;
-        stream -> current_cluster = fat_lookup (stream -> current_cluster);
+        uint32_t next_cluster = stream->current_cluster;
+        error = fat_lookup (stream -> config, stream -> current_cluster, &next_cluster);
+        stream -> current_cluster = next_cluster;
+//         stream -> current_cluster = fat_lookup (stream -> current_cluster);
     }
     return SYS_ERR_OK; // TODO
 }
@@ -103,20 +107,20 @@ static errval_t stream_load (struct sector_stream* stream, void* buffer)
 
 
     sector_to_read = sector_to_read + stream -> sector_index;
-    errval_t error = fat32_driver_read_sector (sector_to_read, buffer);
+    errval_t error = stream->config->read_function (sector_to_read, buffer);
     return error;
 }
 
 
-static uint32_t fat_lookup (uint32_t cluster_index)
+static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index, uint32_t* result_sector)
 {
     char sector [512];
-    errval_t error;
+    errval_t error = SYS_ERR_OK;
     uint32_t result = 0;
     // Read the correct sector in the FAT table (consider upper 25 bits).
     uint32_t fat_sector_offset = cluster_index >> 7;
     debug_printf_quiet ("FAT sector offset: %u\n", fat_sector_offset);
-    error = fat32_driver_read_sector (fat32_fat_start + fat_sector_offset, sector);
+    error = config->read_function (config -> fat_sector_begin + fat_sector_offset, sector);
 
     if (err_is_ok (error)) {
         // Read the next cluster number in this FAT sector (lower 7 bits).
@@ -135,11 +139,13 @@ static uint32_t fat_lookup (uint32_t cluster_index)
             result = 0xFFFFFFFF;
         }
 
+        if (result_sector) {
+            *result_sector = result;
+        }
+
     }
-    // TODO: Better error handling
     debug_printf_quiet ("Result: %x\n", result);
-    assert (err_is_ok (error));
-    return result;
+    return error;
 }
 
 
@@ -526,14 +532,14 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
     config -> read_function = read_function;
     config -> volume_id_sector = fat32_pbb;
 
-    fat32_driver_read_sector = read_function;
+//     fat32_driver_read_sector = read_function;
 
 
     // Read the first block from sector.
     // NOTE: When using partition tables we'll have to change this constant.
     uint32_t fat32_volumeid_block = fat32_pbb;
     uint8_t* volume_id_sector [512];
-    error = fat32_driver_read_sector (fat32_volumeid_block, volume_id_sector);
+    error = config->read_function (fat32_volumeid_block, volume_id_sector);
 
     if (err_is_ok (error)) {
 
@@ -555,7 +561,7 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
         }
 
         // Now we can get the sector index of the first File Allocation Table.
-        fat32_fat_start = fat32_volumeid_block + reserved_sector_count;
+        uint32_t fat32_fat_start = fat32_volumeid_block + reserved_sector_count;
 
         config -> fat_sector_begin = fat32_fat_start;
 
