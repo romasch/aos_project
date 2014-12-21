@@ -10,9 +10,6 @@
 
 #define DIRECTORY_ENTRIES 16
 
-//The function to read a sector.
-// static sector_read_function_t fat32_driver_read_sector;
-
 // Offsets to values in root cluster.
 // NOTE: ARM requires 4-byte aligned addresses.
 static const uint32_t bytes_per_sector_offset = 0x0b; // 2 bytes
@@ -43,19 +40,6 @@ static inline uint32_t get_int (void* buffer, uint32_t offset)
     return ((uint32_t*) buffer) [offset >> 2];
 }
 
-// static uint32_t fat32_volumeid_block; // In the future this value may change when we support partitions.
-// static uint32_t fat32_fat_start;
-
-// static uint32_t fat32_cluster_start;
-// static uint32_t fat32_sectors_per_cluster;
-
-// static uint32_t root_directory_cluster;
-
-// static uint32_t cluster_to_sector_number (uint32_t cluster_index)
-// {
-//     return fat32_cluster_start + (cluster_index-2) * fat32_sectors_per_cluster;
-// }
-
 struct sector_stream {
     struct fat32_config* config;
     uint32_t cluster_start;
@@ -80,38 +64,39 @@ static bool stream_is_finished (struct sector_stream* stream)
     return (stream->current_cluster) >= 0x0FFFFFF8; //TODO: Define constant.
 }
 
+/// Advance the sector stream.
 static errval_t stream_next (struct sector_stream* stream)
 {
     errval_t error = SYS_ERR_OK;
     stream -> sector_index++;
 
-//     if (stream -> sector_index == fat32_sectors_per_cluster) {
     if (stream -> sector_index == stream -> config -> sectors_per_cluster) {
         stream -> sector_index = 0;
         uint32_t next_cluster = stream->current_cluster;
         error = fat_lookup (stream -> config, stream -> current_cluster, &next_cluster);
         stream -> current_cluster = next_cluster;
-//         stream -> current_cluster = fat_lookup (stream -> current_cluster);
     }
     return SYS_ERR_OK; // TODO
 }
 
+/// Load the sector pointed to by 'stream' into 'buffer'.
 static errval_t stream_load (struct sector_stream* stream, void* buffer)
 {
     struct fat32_config* conf = stream -> config;
 
-    // Calculate sector index from cluster index.
+    // Calculate sector number from cluster index.
     uint32_t sector_to_read = conf -> cluster_sector_begin;
     sector_to_read  += ((stream -> current_cluster) - 2) * (conf -> sectors_per_cluster);
-//     uint32_t sector_to_read = cluster_to_sector_number (stream -> current_cluster);
 
-
+    // Add the sector index within the cluster.
     sector_to_read = sector_to_read + stream -> sector_index;
+
+    // Perform the actual read.
     errval_t error = stream->config->read_function (sector_to_read, buffer);
     return error;
 }
 
-
+/// Do a FAT table lookup.
 static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index, uint32_t* result_sector)
 {
     char sector [512];
@@ -149,7 +134,6 @@ static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index,
 }
 
 
-// errval_t fat32_find_node (char* path, uint32_t* ret_cluster, uint32_t* ret_size);
 static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
     debug_printf_quiet ("Find node %s\n", path);
@@ -159,7 +143,6 @@ static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32
     bool end_of_path = false;
     bool found_entry = false;
 
-//     uint32_t cluster_index = root_directory_cluster;
     uint32_t cluster_index = config -> root_directory_cluster;
     uint32_t file_size = 0;
 
@@ -525,115 +508,52 @@ errval_t fat32_read_directory (struct fat32_config* config, char* path, struct a
 
 errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_function, uint32_t fat32_pbb)
 {
-    assert (read_function != NULL);
+    assert (read_function);
     assert (config);
-    errval_t error = SYS_ERR_OK;
 
+    errval_t error = SYS_ERR_OK;
     config -> read_function = read_function;
     config -> volume_id_sector = fat32_pbb;
 
-//     fat32_driver_read_sector = read_function;
-
-
-    // Read the first block from sector.
-    // NOTE: When using partition tables we'll have to change this constant.
-    uint32_t fat32_volumeid_block = fat32_pbb;
-    uint8_t* volume_id_sector [512];
-    error = config->read_function (fat32_volumeid_block, volume_id_sector);
+    // Read the volume id sector.
+    uint8_t* sector [512];
+    error = config->read_function (config -> volume_id_sector, sector);
 
     if (err_is_ok (error)) {
 
         // Check signature
-        assert (get_short (volume_id_sector, signature_offset) == 0xaa55);
+        assert (get_short (sector, signature_offset) == 0xaa55);
 
         // Read the amount of sectors per cluster.
         // Should be 8 according to the formatting command.
-        uint32_t fat32_sectors_per_cluster = get_char (volume_id_sector, sectors_per_cluster_offset);
-        assert (fat32_sectors_per_cluster == 8);
-
-        config -> sectors_per_cluster = fat32_sectors_per_cluster;
+        config->sectors_per_cluster = get_char (sector, sectors_per_cluster_offset);
+        assert (config->sectors_per_cluster == 8);
 
         // Read the amound of reserved sectors.
-        uint32_t reserved_sector_count = get_short (volume_id_sector, reserved_sectors_count_offset);
+        uint32_t reserved_sector_count = get_short (sector, reserved_sectors_count_offset);
         if (reserved_sector_count != 0x20) {
             // The code should work for reserved sectors other than 0x20, but we never tested this.
             debug_printf ("Warning! Reserved sector count in FAT filesystem is 0x%X\n", reserved_sector_count);
         }
 
         // Now we can get the sector index of the first File Allocation Table.
-        uint32_t fat32_fat_start = fat32_volumeid_block + reserved_sector_count;
-
-        config -> fat_sector_begin = fat32_fat_start;
+        config->fat_sector_begin = config->volume_id_sector + reserved_sector_count;
 
         // Read out the size and number of FAT tables.
         // NOTE: The size of a FAT depends on the disk size.
-        uint32_t sectors_per_fat = get_int (volume_id_sector, sectors_per_fat_offset);
-        uint8_t fat_count = get_char (volume_id_sector, fat_count_offset);
+        uint32_t sectors_per_fat = get_int (sector, sectors_per_fat_offset);
+        uint8_t fat_count = get_char (sector, fat_count_offset);
         assert (fat_count == 2);
 
         // Now we can get the sector index of the first cluster in the file system.
-        uint32_t fat32_cluster_start = fat32_fat_start + (fat_count * sectors_per_fat);
-
-
-        config -> cluster_sector_begin = fat32_cluster_start;
+        config->cluster_sector_begin = config->fat_sector_begin + (fat_count * sectors_per_fat);
 
         // Read the first cluster number of the root directory.
-        uint32_t root_directory_cluster = get_int (volume_id_sector, root_dir_cluster_offset);
-        if (root_directory_cluster != 2) {
+        config->root_directory_cluster = get_int (sector, root_dir_cluster_offset);
+        if (config->root_directory_cluster != 2) {
             // The code should work for a root directory cluster other than two, but we never tested this.
-            debug_printf ("Warning! Root directory cluster number in FAT filesystem is %u\n", root_directory_cluster);
+            debug_printf ("Warning! Root directory cluster number in FAT filesystem is %u\n", config->root_directory_cluster);
         }
-
-        config -> root_directory_cluster = root_directory_cluster;
     }
     return error;
 }
-
-/*
-void test_fs (void)
-{
-    /////// Read the first block
-
-    void *root_cluster = malloc(512);
-    assert(root_cluster != NULL);
-    errval_t err = fat32_driver_read_sector(cluster_to_sector_number (root_directory_cluster), root_cluster);
-    assert(err_is_ok(err));
-#ifdef VERBOSE
-    debug_printf_quiet ("Read block %d:\n", cluster_to_sector_number (root_directory_cluster));
-    for (int i = 1; i <= 512; ++i)
-    {
-        printf ("%"PRIu8"\t", ((uint8_t*) root_cluster)[i-1]);
-        if (i % 4 == 0) {
-            printf("\n");
-        }
-    }
-#endif
-
-    /////// Read the file at path /asdf/a.txt
-
-    uint32_t fd = 0;
-    fat32_open_file ("/testdir/hello.txt", &fd);
-    void* buf;
-    size_t buflen;
-    fat32_read_file (fd, 0, 100, &buf, &buflen);
-    debug_printf_quiet ("Size of read file: %u\n", buflen);
-    debug_printf_quiet ("File: %s\n", buf);
-
-    /////// Read some directories.
-
-    debug_printf_quiet ("Reading directory: / \n\n");
-    fat32_read_directory ("/",0,0);
-
-    debug_printf_quiet ("Reading directory: /testdir \n\n");
-    fat32_read_directory ("/testdir/", 0, 0);
-
-    debug_printf_quiet ("Reading directory: /asdf \n\n");
-    fat32_read_directory ("/asdf", 0, 0);
-
-    for (int i=0; i<10; i++) {
-        debug_printf_quiet ("Reading directory: / \n\n");
-        fat32_read_directory ("/",0,0);
-    }
-
-    debug_printf_quiet ("Finished tests\n");
-}//*/

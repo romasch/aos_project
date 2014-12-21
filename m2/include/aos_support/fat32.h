@@ -85,7 +85,4 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
  */
 errval_t fat32_read_directory (struct fat32_config* config, char* path, struct aos_dirent** entry_list, size_t* entry_count);
 
-/// Some test features.
-void test_fs (void);
-
 #endif
