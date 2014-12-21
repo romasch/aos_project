@@ -8,14 +8,36 @@
  */
 typedef errval_t (*sector_read_function_t) (size_t sector_index, void* buffer);
 
+struct fat32_config {
+    // A sector read function.
+    sector_read_function_t read_function;
+
+    // The sector number for the volume ID block.
+    uint32_t volume_id_sector;
+
+    // The number of sectors per cluster.
+    uint32_t sectors_per_cluster;
+
+    // The first sector of the FAT table.
+    uint32_t fat_sector_begin;
+
+    // The first sector of the cluster area.
+    uint32_t cluster_sector_begin;
+
+    // The cluster index of the root directory.
+    uint32_t root_directory_cluster;
+};
+
 /**
  * Initialize the FAT file system.
- * This reads the first block and extracts all information
- * needed for further processing.
+ * This function reads the volume ID block and stores all relevant
+ * information in the config.
  *
+ * \param config: The config struct to be filled.
  * \param read_function: The function to read a block.
+ * \param volume_id_sector: The sector number of the volume ID.
  */
-errval_t fat32_init (sector_read_function_t read_function, uint32_t fat32_pbb);
+errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_function, uint32_t volume_id_sector);
 
 /**
  * Open the specified file.

@@ -6,10 +6,6 @@
 #include <aos_support/server.h>
 #include <aos_support/shared_buffer.h>
 #include <barrelfish/aos_dbg.h>
-
-#define MAX_DIRS_SUPPORTED 64
-
-static char dir_table[MAXNAMELEN * MAX_DIRS_SUPPORTED];
     
 static const uint32_t MBR_SECTOR_IDX = 0U; // MBR is always first sector
     
@@ -115,13 +111,13 @@ static uint32_t parse_master_boot_record (sector_read_function_t read_function)
     return partition_start_sector;
 }
 
+static struct fat32_config my_config;
+
 errval_t start_filesystem_server (void)
 {
     errval_t error = SYS_ERR_OK;
 
-    memset(dir_table, 0, sizeof(dir_table));
-
-    error = fat32_init (mmchs_read_block, parse_master_boot_record (mmchs_read_block));
+    error = fat32_init (&my_config, mmchs_read_block, parse_master_boot_record (mmchs_read_block));
 
     debug_printf ("FAT initialized\n");
 
