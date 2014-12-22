@@ -334,8 +334,10 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 
         // TODO: Use memcpy
         for (int i=0; i<512; i++) {
-            if ( (file_index + i) >= (position + size) || (position + i) > file_size) {
+            // Stop if we've read more than necessary, or if we're after the file boundary.
+            if ( (file_index + i) >= (position + size) || (file_index + i) >= file_size) {
                 early_stop = true;
+            // Copy characters while in range [position, position+size)
             } else if (position <= (file_index + i) && (file_index + i) < (position + size)) {
                 buffer [chars_read] = sector [i];
                 chars_read++;
@@ -344,10 +346,12 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
         file_index += 512;
         error = stream_next (stream);
     }
+
      if (err_is_ok (error)) {
         *buf = buffer;
         *buflen = buffer_size;
     }
+    debug_printf_quiet ("fat32_read_file: %s\n", err_getstring (error));
     return error;
 }
 

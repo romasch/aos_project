@@ -242,18 +242,24 @@ static void execute_cat(char* command)
         if (!err_is_ok(error)) {
             printf ("File does not exist!\n");
         } else {
-            char    * chunk     = NULL;
-            uint32_t  chunk_id  =    0;
-            size_t    chunk_len =   27;
+            void* chunk = NULL;
+            uint32_t chunk_id = 0;
 
-            for (; (chunk_len == 27) && err_is_ok(error) ; chunk_id++){
-                error = aos_rpc_read(filesystem_channel, file, chunk_id * 27, 27, (void**)&chunk, &chunk_len);
-                if (err_is_ok(error)) {
-                    
-                    printf("%.27s\n", chunk);
+            // TODO: We shouldn't split the messages here. Instead it should be done in aos_rpc_read().
+            #define BUFFER_SIZE (1<<20)
+            size_t chunk_len = BUFFER_SIZE;
 
-                    free(chunk);
+
+            for (; (chunk_len == BUFFER_SIZE) && err_is_ok(error) ; chunk_id++){
+                error = aos_rpc_read(filesystem_channel, file, chunk_id * BUFFER_SIZE, BUFFER_SIZE, &chunk, &chunk_len);
+
+                for (int i=0; err_is_ok (error) && i < chunk_len; i++) {
+                    error = aos_rpc_serial_putchar (serial_channel, ((char*) chunk) [i]);
                 }
+//                 if (err_is_ok(error)) {
+//                     printf("%.27s\n", chunk);
+//                     free(chunk);
+//                 }
             }
 
             if (!err_is_ok(error)) {

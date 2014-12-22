@@ -556,49 +556,48 @@ errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **d
 errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size, void** buf, size_t *buflen)
 {
     // Read previously opened file
-
     errval_t error = SYS_ERR_OK;
 
-    if (chan && chan -> shared_buffer == NULL) {
+    // We don't handle NULL pointers here.
+    assert (chan && buf && buflen);
+
+    if (chan -> shared_buffer == NULL) {
         error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
         debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
     }
 
+    // TODO: We need to split read requests for file sizes which don't fit into the shared buffer.
+    assert (size <= chan -> shared_buffer_length);
 
-    if ((chan != NULL) && (buf != NULL) && (buflen != NULL)) {
-        if (size <= MAX_PATH) {
-            struct lmp_message_args  args   ;
-            struct lmp_chan        * channel = &chan->channel;
-    
-            init_lmp_message_args(&args, channel);
+    struct lmp_message_args  args   ;
+    struct lmp_chan        * channel = &chan->channel;
 
-            args.message.words [0] = AOS_RPC_READ_FILE   ;
-            args.message.words [1] = chan -> memory_descriptor;
-    
-            args.message.words [2] = fd      ;
-            args.message.words [3] = position;
-            args.message.words [4] = size    ;
+    init_lmp_message_args(&args, channel);
 
-            error = aos_send_receive (&args, false);
-            print_error (error, "aos_rpc_read: communication failed. %s\n", err_getstring (error));
+    args.message.words [0] = AOS_RPC_READ_FILE   ;
+    args.message.words [1] = chan -> memory_descriptor;
 
-            if (err_is_ok (error)) {
-                error = args.message.words [0];
-                print_error (error, "aos_rpc_read: operation failed. %s\n", err_getstring (error));
+    args.message.words [2] = fd      ;
+    args.message.words [3] = position;
+    args.message.words [4] = size    ;
 
-                if (err_is_ok (error)) {
-                    uint32_t result_length = args.message.words[1];
-                    *buf = malloc (result_length);
-                    if (*buf) {
-                        memcpy (*buf, chan->shared_buffer, result_length);
-//                         memcpy(*buf, &(args.message.words[2]), *buflen);
-                        *buflen = result_length;
-                    } else {
-                        error = LIB_ERR_MALLOC_FAIL;
-                    }
+    error = aos_send_receive (&args, false);
+    print_error (error, "aos_rpc_read: communication failed. %s\n", err_getstring (error));
 
-                }
+    if (err_is_ok (error)) {
+        error = args.message.words [0];
+        print_error (error, "aos_rpc_read: operation failed. %s\n", err_getstring (error));
+
+        if (err_is_ok (error)) {
+            uint32_t result_length = args.message.words[1];
+            *buf = malloc (result_length);
+            if (*buf) {
+                memcpy (*buf, chan->shared_buffer, result_length);
+                *buflen = result_length;
+            } else {
+                error = LIB_ERR_MALLOC_FAIL;
             }
+
         }
     }
 
