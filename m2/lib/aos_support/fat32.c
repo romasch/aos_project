@@ -323,6 +323,12 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
         error = LIB_ERR_MALLOC_FAIL;
     }
 
+    // Skip sectors which are not interesting.
+    while (!stream_is_finished (stream) && file_index + 512 < position && err_is_ok (error)) {
+        error = stream_next (stream);
+        file_index += 512;
+    }
+
     while (!stream_is_finished (stream) && chars_read != size && err_is_ok (error)) {
         error = stream_load (stream, sector);
 
