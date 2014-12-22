@@ -10,16 +10,6 @@
 
 #define DIRECTORY_ENTRIES 16
 
-// Offsets to values in root cluster.
-// NOTE: ARM requires 4-byte aligned addresses.
-static const uint32_t bytes_per_sector_offset = 0x0b; // 2 bytes
-static const uint32_t sectors_per_cluster_offset = 0x0d; // 1 bytes
-static const uint32_t reserved_sectors_count_offset = 0x0e; // 2 bytes
-static const uint32_t fat_count_offset = 0x10; // 1 bytes
-static const uint32_t sectors_per_fat_offset = 0x24; // 4 bytes
-static const uint32_t root_dir_cluster_offset = 0x2c; // 4 bytes
-static const uint32_t signature_offset = 0x1fe; // 2 bytes
-
 
 static inline uint8_t get_char (void* buffer, uint32_t offset)
 {
@@ -506,6 +496,17 @@ errval_t fat32_read_directory (struct fat32_config* config, char* path, struct a
 }
 
 
+// Offsets within the Volume ID block, as defined in the FAT specification.
+// NOTE: When accessing these values, make sure to only dereference 4-byte aligned addresses.
+#define BYTES_PER_SECTOR_OFFSET 0x0b
+#define SECTORS_PER_CLUSTER_OFFSET 0x0d
+#define RESERVED_SECTOR_COUNT_OFFSET 0x0e
+#define FAT_COUNT_OFFSET 0x10
+#define SECTORS_PER_FAT_OFFSET 0x24
+#define ROOT_DIRECTORY_CLUSTER_OFFSET 0x2c
+#define SIGNATURE_OFFSET 0x1fe
+
+/// See header file.
 errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_function, uint32_t fat32_pbb)
 {
     assert (read_function);
@@ -519,20 +520,25 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
     uint8_t* sector [512];
     error = config->read_function (config -> volume_id_sector, sector);
 
-    if (err_is_ok (error)) {
+    // Check the signature.
+    if (err_is_ok (error) && get_short (sector, SIGNATURE_OFFSET) != 0xAA55) {
+        error = FAT_ERR_BAD_FS;
+    }
 
-        // Check signature
-        assert (get_short (sector, signature_offset) == 0xaa55);
+    if (err_is_ok (error)) {
 
         // Read the amount of sectors per cluster.
         // Should be 8 according to the formatting command.
-        config->sectors_per_cluster = get_char (sector, sectors_per_cluster_offset);
-        assert (config->sectors_per_cluster == 8);
+        config->sectors_per_cluster = get_char (sector, SECTORS_PER_CLUSTER_OFFSET);
+        if (config->sectors_per_cluster != 8) {
+            // A different number of sectors per cluster has never been tested.
+            debug_printf ("Warning! Sectors per cluster is %u\n", config->sectors_per_cluster);
+        }
 
         // Read the amound of reserved sectors.
-        uint32_t reserved_sector_count = get_short (sector, reserved_sectors_count_offset);
+        uint32_t reserved_sector_count = get_short (sector, RESERVED_SECTOR_COUNT_OFFSET);
         if (reserved_sector_count != 0x20) {
-            // The code should work for reserved sectors other than 0x20, but we never tested this.
+            // A different number of reserved sectors has never been tested.
             debug_printf ("Warning! Reserved sector count in FAT filesystem is 0x%X\n", reserved_sector_count);
         }
 
@@ -541,15 +547,18 @@ errval_t fat32_init (struct fat32_config* config, sector_read_function_t read_fu
 
         // Read out the size and number of FAT tables.
         // NOTE: The size of a FAT depends on the disk size.
-        uint32_t sectors_per_fat = get_int (sector, sectors_per_fat_offset);
-        uint8_t fat_count = get_char (sector, fat_count_offset);
-        assert (fat_count == 2);
+        uint32_t sectors_per_fat = get_int (sector, SECTORS_PER_FAT_OFFSET);
+        uint8_t fat_count = get_char (sector, FAT_COUNT_OFFSET);
+        if (fat_count != 2) {
+            // A different number of FAT tables has never been tested.
+            debug_printf ("Warning! Number of FAT tables is %u\n", fat_count);
+        }
 
         // Now we can get the sector index of the first cluster in the file system.
         config->cluster_sector_begin = config->fat_sector_begin + (fat_count * sectors_per_fat);
 
         // Read the first cluster number of the root directory.
-        config->root_directory_cluster = get_int (sector, root_dir_cluster_offset);
+        config->root_directory_cluster = get_int (sector, ROOT_DIRECTORY_CLUSTER_OFFSET);
         if (config->root_directory_cluster != 2) {
             // The code should work for a root directory cluster other than two, but we never tested this.
             debug_printf ("Warning! Root directory cluster number in FAT filesystem is %u\n", config->root_directory_cluster);
