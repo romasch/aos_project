@@ -32,18 +32,28 @@ errval_t initialize_device_frame_server (struct capref io_space_cap);
 errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struct capref* ret_frame);
 
 // Process management:
+enum domain_info_state {domain_info_state_free = 0, domain_info_state_running, domain_info_state_zombie};
 struct domain_info
 {
-    char name[MAX_PROCESS_NAME_LENGTH + 1]; // TODO: Can we lift this restriction, or cut dependency to RPC mechanism?
+    // The first MAX_PROCESS_NAME_LENGTH characters of the domain name.
+    // TODO: Storing the full name of a domain would be nice, although it complicates management.
+    char name[MAX_PROCESS_NAME_LENGTH + 1];
+
+    // The dispatcher frame of the domain.
     struct capref dispatcher_frame;
-    bool exists; // TODO: Use this instead of the name.
+
+    // The current state (running, zombie etc...)
+    enum domain_info_state state;
+
     // Initial connection to domain.
     // NOTE: Malloced and owned by this struct, needs to be freed.
     struct lmp_chan* channel;
+
     // Possible observer for termination events.
     // NOTE: Not owned, do not free!
     struct lmp_chan* termination_observer;
 };
+
 errval_t init_domain_manager (void);
 uint32_t max_domain_id (void);
 struct domain_info* get_domain_info (domainid_t id);

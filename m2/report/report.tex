@@ -287,6 +287,42 @@ Finally, we also create the capability to the shared frame in this functions and
 - Communication between cores
 
 \subsection{FAT file system}
+
+The FAT filesystem is implemented in \filepath{aos\_support/fat32.c}, whereas the server and disk driver is located in \filepath{usr/mmchs/}.
+We only support read operations on a FAT filesystem, and we didn't try to improve the block driver as well.
+
+The main data structure for the FAT filesystem is the config struct:
+
+\begin{lstlisting}
+struct fat32_config {
+    sector_read_function_t read_function;
+
+    uint32_t volume_id_sector;
+    uint32_t sectors_per_cluster;
+    uint32_t fat_sector_begin;
+    uint32_t cluster_sector_begin;
+    uint32_t root_directory_cluster;
+};
+\end{lstlisting}
+
+Within the struct we store some of the most important data, such as the start address of the File Allocation Table or the cluster region.
+We also store a pointer to a function needed to read a block from disk.
+That way we can easily reuse the FAT driver module for block devices other than the SD card of the Pandaboard.
+
+A common operation in the FAT filesystem is to follow a chain of clusters and read consecutive sectors.
+We added a small support structure \lstinline!struct sector_stream! to hide this complexity.
+A sector stream is an iterator over a file or directory and can be advanced with \lstinline!stream_next!.
+
+\subsubsection{File management}
+
+Open files are identified by a file descriptor.
+When opening a file we scan the directories in the path until we find a file with a matching name, and then we store the start cluster, file size, and the \lstinline!fat32_config! structure.
+
+
+
+
+
+
 - filesystem code in aos\_support/fat32.c
 - handler in mmchs/filesystem\_server.c
 - Currently read-only

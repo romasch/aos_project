@@ -149,6 +149,8 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 {
     errval_t error = SYS_ERR_OK;
 
+    struct domain_info* domain = NULL;
+
         // NOTE: In most cases we shouldn't use LMP_SEND_FLAGS_DEFAULT,
         // otherwise control will be transfered back to sender immediately...
     switch (type)
@@ -182,16 +184,18 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             break;
         case AOS_ROUTE_FIND_SERVICE:;
             debug_printf_quiet ("Got AOS_ROUTE_FIND_SERVICE 0x%x\n", message -> words [1]);
-            // generate new ID
-            uint32_t id = find_request_index;
-            find_request_index++;
-            // store current channel at ID
-            find_request [id] = channel;
+
             // find correct server channel
             uint32_t requested_service = message -> words [1];
             struct lmp_chan* serv = services [requested_service];
-            // generate AOS_ROUTE_REQUEST_EP request with ID.
+
             if (serv != NULL) {
+                // generate new ID
+                uint32_t id = find_request_index;
+                find_request_index++;
+                // store current channel at ID
+                find_request [id] = channel;
+                // generate AOS_ROUTE_REQUEST_EP request with ID.
                 lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
             } else {
                 // Service is unknown. Send error back.
@@ -202,9 +206,9 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             debug_printf_quiet ("Got AOS_ROUTE_DELIVER_EP\n");
             // get error value and ID from message
             errval_t error_ret = message -> words [1];
-            id = message -> words [2];
+            uint32_t req_id = message -> words [2];
             // lookup receiver channel at ID
-            struct lmp_chan* recv = find_request [id]; // TODO: delete id
+            struct lmp_chan* recv = find_request [req_id]; // TODO: delete id
             // generate response with cap and error value
             lmp_chan_send1 (recv, 0, cap, error_ret);
             // Delete capability and reuse slot.
@@ -234,10 +238,12 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             domainid_t pid    = message -> words [1];
             debug_printf_quiet ("Got AOS_RPC_GET_PROCESS_NAME  for process %u\n", pid);
 
-            if ((pid < max_domain_id()) && (get_domain_info (pid) -> name[0] != '\0')) {
+            domain = get_domain_info (pid);
+
+            if ((pid < max_domain_id()) && domain -> state == domain_info_state_running) {
                 uint32_t args[8];
 
-                strcpy((char*)args, get_domain_info (pid) -> name);
+                strcpy((char*)args, domain -> name);
 
                 lmp_chan_send9 (channel, 0, NULL_CAP, SYS_ERR_OK, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
             } else {
@@ -252,7 +258,7 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             int idx2 = 0xffffffff;
 
             for (int i = message -> words [1]; (i < max_domain_id()) && (args_index < 7); i++) {
-                if (get_domain_info (i) -> name[0] != '\0') {
+                if (get_domain_info (i) -> state == domain_info_state_running) {
                     args[args_index] = i;
                     args_index++;
                     idx2  = i + 1;
@@ -270,10 +276,11 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             uint32_t pid_to_kill = message -> words [1];
             debug_printf_quiet ("Got AOS_RPC_KILL: %u\n", pid_to_kill);
             // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
-            struct domain_info* domain = get_domain_info (pid_to_kill);
+            domain = get_domain_info (pid_to_kill);
             lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
 
-            domain -> name[0] = '\0';
+//             domain -> name[0] = '\0';
+            domain -> state = domain_info_state_zombie;
             error = cap_revoke (domain -> dispatcher_frame);
             error = cap_destroy (domain -> dispatcher_frame);
 
@@ -289,13 +296,13 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
         case AOS_RPC_WAIT_FOR_TERMINATION:;
             uint32_t pid_to_wait = message -> words [1];
             debug_printf_quiet ("Got AOS_RPC_WAIT_FOR_TERMINATION: %u\n", pid_to_wait);
-            struct domain_info* wait_domain = get_domain_info (pid_to_wait);
 
-            if (wait_domain -> name[0] == '\0') {
-                // Domain is already dead!
+            domain = get_domain_info (pid_to_wait);
+
+            if (domain -> state != domain_info_state_running) {
                 lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
             } else {
-                wait_domain -> termination_observer = channel;
+                domain -> termination_observer = channel;
             }
             break;
         default:
