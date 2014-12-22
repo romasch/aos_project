@@ -56,6 +56,7 @@ errval_t map_shared_buffer (struct capref frame, uint32_t* memory_descriptor)
     // Update data structures and return values.
     if (err_is_ok (error)) {
         buffer_manager [free_index].is_used = true;
+        buffer_manager [free_index].frame_size_bits = size_bits;
         buffer_manager [free_index].frame_capability = frame;
         if (memory_descriptor) {
             *memory_descriptor = free_index;

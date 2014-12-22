@@ -16,12 +16,13 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 {
     //uint32_t did   = message->words[1]; TODO: introduce inter-process isolation on files.
     errval_t error;
+    uint32_t memory_descriptor = 0;
+    uint32_t file_descriptor = 0;
 
     switch (message_type) {
         case AOS_RPC_OPEN_FILE:;
             {
-                uint32_t  file_descriptor;
-                char    * path            = (char*)(&message->words[2]);
+                char* path = (char*)(&message->words[2]);
 
                 error = fat32_open_file(&my_config, path, &file_descriptor);
 
@@ -29,9 +30,9 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             }
             break;
         case AOS_RPC_READ_DIR_NEW:;
-            uint32_t mem_descriptor = message -> words [1];
+            memory_descriptor = message -> words [1];
             void* buffer = NULL;
-            error = get_shared_buffer (mem_descriptor, &buffer, NULL);
+            error = get_shared_buffer (memory_descriptor, &buffer, NULL);
             assert (err_is_ok (error)); //TODO
             debug_printf_quiet ("AOS_RPC_READ_DIR_NEW: Path %s, count %u\n", (char*) buffer, strlen(buffer));
 
@@ -46,30 +47,35 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_send2 (channel, 0, NULL_CAP, error, count);
             break;
         case AOS_RPC_READ_FILE:;
-            {
-                void    * buf            ;
-                size_t    buflen         ;
-                uint32_t  file_descriptor = message->words[2];
-                uint32_t  position        = message->words[3];
-                size_t    size            = message->words[4];
+            memory_descriptor = message -> words [1];
+            file_descriptor = message -> words [2];
+            uint32_t position = message -> words [3];
+            uint32_t size = message -> words [4];
 
-                error = fat32_read_file(file_descriptor, position, size, &buf, &buflen);
+            void* result_buffer = NULL;
+            uint32_t result_buffer_length = 0;
+            error = get_shared_buffer (memory_descriptor, &result_buffer, &result_buffer_length);
+
+            size_t characters_read = 0;
+
+            // TODO: Send back an error.
+            assert (size <= result_buffer_length);
+
+             if (err_is_ok (error)) {
+                // TODO: It would be nice if we could fill the shared buffer directly instead of using memcpy.
+                void* buf = NULL;
+                error = fat32_read_file (file_descriptor, position, size, &buf, &characters_read);
+
                 if (err_is_ok (error)) {
-                    uint32_t words[7];
-
-                    memcpy(words, buf, buflen);
-                    free  (       buf        );
-
-                    lmp_chan_send9(channel, 0, NULL_CAP, error, buflen, words[0], words[1], words[2], words[3], words[4], words[5], words[6]);
-                } else {
-                    lmp_chan_send1(channel, 0, NULL_CAP, error                                                                              );
+                    memcpy (result_buffer, buf, characters_read);
+                    free (buf);
                 }
             }
+            lmp_chan_send2 (channel, 0, NULL_CAP, error, characters_read);
             break;
         case AOS_RPC_CLOSE_FILE:;
             {
-                // TODO: handle close of directory handles
-                uint32_t file_descriptor = message->words[2];
+                file_descriptor = message->words[2];
                 
                 error = fat32_close_file(file_descriptor);
 

@@ -322,9 +322,11 @@ enum aos_service {
  *
  * Type: Synchronous
  * Target: filesystem driver
- * Send Args: handle for opened file, offset, size
+ * Send Args: memory descriptor for result buffer, file descriptor, position, size
  * Send Capability: -
- * Receive Args: error value and data chunk.
+ * Receive Args: Error value, number of characters read
+ * Receive Buffer: File contents
+ *
  * Receive Capability: -
  */
 #define AOS_RPC_READ_FILE 22
