@@ -114,13 +114,11 @@ static void exec_external_command(char* const command, char* const args)
     domainid_t pid       ;
     bool       success    = false;
 
+    if (args[strlen(args) - 1U] == '&') {
+        background              = true;    
+        args[strlen(args) - 1U] = '\0';
+    } 
     
-    for (int i=0; command[i] != '\0'; i++) {
-        if (command[i] == '&') {
-            background = true;
-        }
-    }
-
     for (int i = 0; command[i] != '\0'; i++) {
         if ((isalnum((int)command[i]) == false) && (command[i] != '-') && (command[i] != '_')) {
             command[i] = '\0';
@@ -307,7 +305,7 @@ static void exec_oncore(char* const args)
     
     for (; (isalnum((int)*args_str) == false) && (*args_str != '-') && (*args_str != '_') && (*args_str != '\0'); args_str++);
     
-    core = atoi(args_str);
+    core = atoi(args);
     
     if (core == 0) {
         exec_external_command(args_str, split_request(args_str));
