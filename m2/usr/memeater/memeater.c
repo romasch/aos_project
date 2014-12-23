@@ -115,18 +115,17 @@ static void exec_external_command(char* const command, char* const args)
     bool       success    = false;
 
     if (args[strlen(args) - 1U] == '&') {
-        background              = true;    
+        background              = true;
         args[strlen(args) - 1U] = '\0';
     } 
+
+
+    char concat_cmd [256]; // NOTE: This is the size of the input array.
+    strcat (concat_cmd, command);
+    strcat (concat_cmd, " ");
+    strcat (concat_cmd, args);
     
-    for (int i = 0; command[i] != '\0'; i++) {
-        if ((isalnum((int)command[i]) == false) && (command[i] != '-') && (command[i] != '_')) {
-            command[i] = '\0';
-            i--;
-        }
-    }
-    
-    err     = aos_rpc_process_spawn (pm_channel, command, 0, &pid);
+    err     = aos_rpc_process_spawn (pm_channel, concat_cmd, 0, &pid);
     success = err_is_ok             (err                         );
 
     if (!background && success) { // not background

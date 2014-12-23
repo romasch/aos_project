@@ -6,17 +6,32 @@
 
 #include <barrelfish/aos_rpc.h>
 
-#define BUFSIZE (48UL*1024*1024)
+#define DEFAULT_SIZE 48ul
+#define MEGABYTE (1024*1024)
 
 int main(int argc, char *argv[])
 {
-    printf ("memtest started as: %s\n", argv[0]);
+    printf ("memtest started with %u arguments: ", argc);
+    for (int i=0; i<argc; i++) {
+        printf ("%s ", argv[i]);
+    }
+    printf ("\n");
 
-    char* mbuf = malloc (BUFSIZE);
+    int32_t size = 0;
 
-    printf ("memtest: buffer allocated.\n");
+    if (argc >= 2) {
+        size = atoi (argv [1]);
+    }
+    if (size <= 0) {
+        printf ("Invalid buffer size. Using default value.\n");
+        size = DEFAULT_SIZE;
+    }
+
+    printf ("memtest: Allocating buffer of %u MB.\n", size);
+    size = size * MEGABYTE;
+    char* mbuf = malloc (size);
     
-    for (int mi=0; mi<BUFSIZE; mi++) {
+    for (int mi=0; mi<size; mi++) {
         mbuf[mi] = mi % 255;
     }
 
