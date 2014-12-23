@@ -303,13 +303,12 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
                 if (err_is_ok (error)) {
                     error = cap_destroy (domain -> dispatcher_capability);
                 }
-                // TODO: Revoking the root cnode creates a problem in init.1 when no other domain is left.
-//                 if (err_is_ok (error)) {
-//                     error = cap_revoke (domain -> root_cnode_capability);
-//                 }
-//                 if (err_is_ok (error)) {
-//                     error = cap_destroy (domain -> root_cnode_capability);
-//                 }
+                if (err_is_ok (error)) {
+                    error = cap_revoke (domain -> root_cnode_capability);
+                }
+                if (err_is_ok (error)) {
+                    error = cap_destroy (domain -> root_cnode_capability);
+                }
 
                 // Send back an acknowledgement if it's not a self-kill.
                 if (channel != domain -> channel) {
@@ -467,6 +466,10 @@ int main(int argc, char *argv[])
     assert (err_is_ok (err));
 
     if (get_core_id () != 0) {
+        // NOTE: This is a workaround for a bug.
+        // init.1 crashes if the CSpace of all its child domains are revoked.
+        // With test_domain we can make sure that at least one domain stays active.
+        spawn ("test_domain", NULL);
         // We're the second init and need to create a listener thread.
         ikcsrv = thread_create(ikc_server, NULL);
 

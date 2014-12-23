@@ -34,8 +34,8 @@ static void exec_cd         (char* const args);
 static void exec_echo       (char* const args);
 static void exec_exit       (char* const args);
 static void exec_kill       (char* const args);
-static void exec_leadoff    (char* const args);
-static void exec_leadon     (char* const args);
+static void exec_ledoff    (char* const args);
+static void exec_ledon     (char* const args);
 static void exec_ls         (char* const args);
 static void exec_oncore     (char* const args);
 static void exec_ping       (char* const args);
@@ -54,8 +54,8 @@ static struct command_desc command_list[] =
     { exec_echo       , "echo"        },
     { exec_exit       , "exit"        },
     { exec_kill       , "kill"        },
-    { exec_leadoff    , "leadoff"     },
-    { exec_leadon     , "leadon"      },
+    { exec_ledoff    , "ledoff"     },
+    { exec_ledon     , "ledon"      },
     { exec_ls         , "ls"          },
     { exec_oncore     , "oncore"      },
     { exec_ping       , "ping"        },
@@ -254,12 +254,12 @@ static void exec_kill(char* const args)
     }
 }
 
-static void exec_leadoff(char* const args)
+static void exec_ledoff(char* const args)
 {
     aos_rpc_set_led (led_channel, false);
 }
 
-static void exec_leadon(char* const args)
+static void exec_ledon(char* const args)
 {
     aos_rpc_set_led (led_channel, true);
 }
@@ -423,7 +423,7 @@ static void start_shell (void)
     char command[256];
     bool handled      = false;
 
-    printf ("Started simple shell...\n");
+    printf ("Starting shell:\n");
 
     shell_running = true;
     for (; shell_running != false ;) {
@@ -461,7 +461,7 @@ int main(int argc, char *argv[])
 
     aos_rpc_set_foreground (serial_channel, disp_get_domain_id());
 
-    printf("memeater started\n");
+//     debug_printf ("Memeater started with %u args. Name: %s\n", argc, argv[0]);
 
     filesystem_channel = malloc (sizeof (struct aos_rpc));
     if (filesystem_channel) {

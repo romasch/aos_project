@@ -7,6 +7,7 @@
 #include <aos_support/server.h>
 
 #define INITIAL_TABLE_LENGTH 4
+#define MAX_ARGUMENTS 32
 
 static struct domain_info* domain_table;
 static uint32_t domain_table_count;
@@ -96,15 +97,27 @@ static errval_t copy_capability (struct capref* destination, struct capref sourc
 /**
  * Spawn a new domain with an initial channel to init.
  *
- * \arg domain_name: The name of the new process. NOTE: Name should come
- * without path prefix, i.e. just pass "memeater" instead of "armv7/sbin/memeater".
+ * \param command_string: The name and arguments of the new process.
+ * NOTE: For multiboot modules the name should not contain a prefix,
+ * i.e. just pass "memeater" instead of "armv7/sbin/memeater".
  *
- * \arg domain_id: ID of the new domain.
+ * \param domain_id: ID of the new domain.
  */
-static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id)
+static errval_t spawn_with_channel (char* command_string, uint32_t domain_id)
 
 {
     errval_t error = SYS_ERR_OK;
+    assert (command_string);
+
+    // Prepare arguments.
+    char* argv [MAX_ARGUMENTS];
+    int32_t argc = spawn_tokenize_cmdargs (command_string, argv, MAX_ARGUMENTS);
+    char* domain_name = argv [0];
+
+    // Early exit if name is empty.
+    if (argc <= 0) {
+        return AOS_ERR_LMP_INVALID_ARGS;
+    }
 
     // Find the module.
     struct module_info* info;
@@ -125,9 +138,8 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id)
 
     if (err_is_ok (error)) {
 
-        // Set up default arguments.
-        // TODO: Support user-provided arguments.
-        char* argv [] = {domain_name, NULL};
+        // Create a dummy environment pointer.
+        // We do not support environments yet.
         char* envp [] = {NULL};
 
         // Load the image and set up addess space, cspace etc.
@@ -186,10 +198,10 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id)
 /**
  * Spawn a new domain.
  *
- * \param name: The name of the binary.
+ * \param command: The name and arguments of the binary.
  * \param ret_id: Return parameter for the ID.
  */
-errval_t spawn (char* name, domainid_t* ret_id)
+errval_t spawn (char* command, domainid_t* ret_id)
 {
     errval_t error = SYS_ERR_OK;
     uint32_t idx = -1;
@@ -200,10 +212,10 @@ errval_t spawn (char* name, domainid_t* ret_id)
     if (err_is_ok (error)) {
         struct domain_info* domain = get_domain_info (idx);
 
-        error = spawn_with_channel (name, idx);
+        error = spawn_with_channel (command, idx);
 
         if (err_is_ok(error)) {
-            strncpy(domain -> name, name, MAX_PROCESS_NAME_LENGTH);
+            strncpy(domain -> name, command, MAX_PROCESS_NAME_LENGTH);
             domain -> name[MAX_PROCESS_NAME_LENGTH] = '\0';
             domain -> state = domain_info_state_running;
             if (ret_id) {
