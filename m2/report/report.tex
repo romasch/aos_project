@@ -156,11 +156,11 @@ The LMP system has some important characteristics:
 \end{itemize}
 
 The individual message types and their arguments are described in the header file \filepath{include/barrelfish/aos\_rpc.h}.
-To support writing code on the client side we implemented the feature \lstinline!aos_send_receive! which takes a struct containint all arguments, 
+To support writing code on the client side we implemented the feature \lstinline!aos_send_receive! which takes a struct containing all arguments, 
 sends a request to the server, waits for a reply, and copies the receive arguments back into the struct.
-That way we could avoid having to write the same functionality for every message type.
+That way we could avoid some code duplication for every remote procedure call.
 
-Some servers provide core system services. Init for exampleprovides RAM, and the serial\_driver provides I/O.
+Some servers provide core system services. Init for example provides RAM, and the serial\_driver provides I/O.
 We therefore provide some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
 The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
 
@@ -220,7 +220,6 @@ The server-side part is implemented in \filepath{lib/aos\_support/}, which had t
 The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, where it is now possible to ``attach'' a shared buffer to any \lstinline!struct aos_rpc! channel.
 
 The bulk transfer mechanism was a pretty late addition to the code base, therefore not all RPC calls have been changed to make use of it yet.
-
 
 \subsection{Shell}
 	Shell is a standard mean of communication and interaction between user and developed operating system.
@@ -338,13 +337,67 @@ The bulk transfer mechanism was a pretty late addition to the code base, therefo
 
 \subsection{Process management}
 \label{sec:process-management}
-- currently done in init
-- server manages process table and info about loaded modules
--- can be printed with ps command
-- shell attempts to start program with specific name if command not recognized
-- mechanism to register for end notification (foreground tasks)
-- kill command to revoke dispatcher capability (background tasks)
-- no further cleanup for zombie domains as for now
+
+Spawning and managing domains is done in init.
+The relevant code can be found in \filepath{usr/init/process\_manager.c}, \filepath{usr/init/main.c} and \filepath{lib/aos\_support/module\_manager.c}.
+The latter keeps track of the modules shipped with the multiboot image and maps them into init's address space.
+
+The process manager is responsible to spawn a new domain and keep track of all running domains.
+The main data structure within the process manager is the \lstinline!domain_info! struct.
+It keeps track of a domain's state, its dispatcher and CSpace, and its channel to \emph{init}.
+
+The most important function is \lstinline!spawn!, which takes the name of a domain as an argument.
+The function does all the steps required to spawn a new domain:
+\begin{itemize}
+ \item Loading the multiboot module.
+ \item Setting up the Dispatcher, CSpace and VSpace.
+ \item Parse and relocate the ELF image.
+ \item Create the channel between init and the new domain.
+ \item Store relevant data in the \lstinline!domain_info! struct.
+ \item Make the domain runnable.
+\end{itemize}
+
+The process manager maintains an array of \lstinline!domain_info! structs to keep track of all spawned domains.
+The array index serves as a unique domain identifier.
+If the initial length of the array is insufficient it can be dynamically grown, so we don't have a hard limit on the number of possible domains.
+The \lstinline!ps! command dumps the name and domain ID of every domain stored within the array.
+
+\subsubsection {Domain Teardown}
+
+Tearing down a domain is challenging in barrelfish.
+The first issue we had to solve is to realize \emph{when} a domain needs to be cleaned up, i.e. we needed to get some notification that a domain has stopped running.
+To solve this problem we added a new IPC call \lstinline!AOS_RPC_KILL! which can be used to kill a domain, given a domain ID.
+We then adapted \lstinline!libc_exit! in \filepath{lib/barrelfish/init.c} to perform this call with its own ID (i.e. the domain commits suicide).
+
+Init therefore gets a notification that some domain wants to be killed.
+It can then revoke the dispatcher capability to make the domain unrunnable.
+
+The next step would be to properly clean up the domain.
+This would consist of returning all frames and device frames to the corresponding server and revoke the root CNode to clean up the capability space.
+We could only implement the last part however, as keeping track of allocated frames for each domain would have required us to do some major refactoring.
+This in turn means that we're leaking memory for each spawned domain, and it's the reason why a domain never leaves the \emph{zombie} state as for now.
+
+The introduction of \lstinline!AOS_RPC_KILL! allowed us to introduce another mechanism.
+A domain can now issue an \lstinline!AOS_RPC_WAIT_FOR_TERMINATION! to get a notification as soon as another domain stops.
+The shell makes use of this facility to suspend itself during foreground tasks.
+And because we already had the \lstinline!AOS_RPC_KILL! call we could also very easily extend our shell to spawn process in the background and \emph{kill} them later.
+
+\subsubsection{Assessment}
+Our domain management code went through many refactorings, and we're still not quite happy.
+The main problem is to properly clean up a zombie domain.
+
+It would be necessary to keep track of frames and device frames allocated by that domain and return them to the servers upon teardown.
+This would have meant to introduce a lot more state and changes in existing IPC calls to keep track of allocated frames.
+A potential problem is the bulk transfer mechanism, where frames are shared between client and server, and it might not be that easy to revoke these frames.
+With some more time we may have been able to find a solution, but it's certainly not an easy task.
+
+% - currently done in init
+% - server manages process table and info about loaded modules
+% -- can be printed with ps command
+% - shell attempts to start program with specific name if command not recognized
+% - mechanism to register for end notification (foreground tasks)
+% - kill command to revoke dispatcher capability (background tasks)
+% - no further cleanup for zombie domains as for now
 
 \subsection{Mupltiple Cores}
 
@@ -406,21 +459,37 @@ A common operation in the FAT filesystem is to follow a chain of clusters and re
 We added a small support structure \lstinline!struct sector_stream! to hide this complexity.
 A sector stream is an iterator over a file or directory and can be advanced with \lstinline!stream_next!.
 
+An important internal function is \lstinline!find_node!.
+This function takes a path as an argument and tries to find a filesystem node (file or directory) with the given path.
+If found it returns the start cluster and the file size (if it is a file) of the node.
+
 \subsubsection{File management}
 
-Open files are identified by a file descriptor.
-When opening a file we scan the directories in the path until we find a file with a matching name, and then we store the start cluster, file size, and the \lstinline!fat32_config! structure.
+File operations are done in the usual open-read-close cycle and identified by a file descriptor.
+When opening a file we call \lstinline!find_node! to search the filesystem for the file with the given path.
+We then store a mapping from the file descriptor to the start cluster, the file size and the \lstinline!fat32_config!.
 
+For file reads we use the \lstinline!sector_stream!.
+We skip the first few sectors until we reach the position in the file requested by the user.
+After that we just do a linear scan of the file and copy all bytes into a buffer.
+To send the byte buffer back to the client we make use of the bulk transfer mechanism.
 
+When closing a file we just discard the information collected during the open phase.
 
+\subsubsection{Partition tables}
 
+Due to the fact that Windows couldn't create an SD card without a partition table we had to add some rudimentary support for it.
+The filesystem server loads the partition table and looks at the first partition table entry.
+It then extracts the start block of the first partition and initializes the FAT driver with that information.
 
+\subsubsection{Assessment}
+\todo{Write assessment}
 
-- filesystem code in aos\_support/fat32.c
-- handler in mmchs/filesystem\_server.c
-- Currently read-only
-- some support for partition tables
-- Performance improvements: sequential read? cached FAT? bulk transfer?
+% - filesystem code in aos\_support/fat32.c
+% - handler in mmchs/filesystem\_server.c
+% - Currently read-only
+% - some support for partition tables
+% - Performance improvements: sequential read? cached FAT? bulk transfer?
 
 \subsubsection{ ELF loading}
 

@@ -175,20 +175,14 @@ static void exec_cat(char* const args)
         if (!err_is_ok(error)) {
             printf ("File does not exist!\n");
         } else {
-            void    * chunk    = NULL;
-            uint32_t  chunk_id = 0   ;
+            #define MAX_FILE_LENGTH (1ul << 30)
+            void* buffer = NULL;
+            size_t buffer_length = 0;
+            error = aos_rpc_read (filesystem_channel, file, 0, MAX_FILE_LENGTH, &buffer, &buffer_length);
 
-            // TODO: We shouldn't split the messages here. Instead it should be done in aos_rpc_read().
-            #define BUFFER_SIZE (1<<20)
-            size_t chunk_len = BUFFER_SIZE;
-
-
-            for (; (chunk_len == BUFFER_SIZE) && err_is_ok(error) ; chunk_id++){
-                error = aos_rpc_read(filesystem_channel, file, chunk_id * BUFFER_SIZE, BUFFER_SIZE, &chunk, &chunk_len);
-
-                for (int i=0; err_is_ok (error) && i < chunk_len; i++) {
-                    error = aos_rpc_serial_putchar (serial_channel, ((char*) chunk) [i]);
-                }
+            // Print the file.
+            for (int i=0; err_is_ok (error) && i < buffer_length; i++) {
+                error = aos_rpc_serial_putchar (serial_channel, ((char*) buffer) [i]);
             }
             aos_rpc_serial_putchar (serial_channel, '\n');
 

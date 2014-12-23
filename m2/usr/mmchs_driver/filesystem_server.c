@@ -56,20 +56,13 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             uint32_t result_buffer_length = 0;
             error = get_shared_buffer (memory_descriptor, &result_buffer, &result_buffer_length);
 
-            size_t characters_read = 0;
-
             // TODO: Send back an error.
             assert (size <= result_buffer_length);
 
-             if (err_is_ok (error)) {
-                // TODO: It would be nice if we could fill the shared buffer directly instead of using memcpy.
-                void* buf = NULL;
-                error = fat32_read_file (file_descriptor, position, size, &buf, &characters_read);
+            size_t characters_read = result_buffer_length;
 
-                if (err_is_ok (error)) {
-                    memcpy (result_buffer, buf, characters_read);
-                    free (buf);
-                }
+             if (err_is_ok (error)) {
+                error = fat32_read_file (file_descriptor, position, size, result_buffer, &characters_read);
             }
             lmp_chan_send2 (channel, 0, NULL_CAP, error, characters_read);
             break;

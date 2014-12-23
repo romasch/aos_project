@@ -87,9 +87,6 @@ static void default_handler (void* arg)
         lmp_chan_alloc_recv_slot (channel);
     }
 
-    // Re-register ourselves.
-    lmp_chan_register_recv (channel, get_default_waitset(), MKCLOSURE(default_handler, arg));
-
     // Now we're ready to handle the message.
     if (err_is_ok (error)) {
 
@@ -167,7 +164,11 @@ static void default_handler (void* arg)
 
                 external_handler (channel, &message, capability, type);
         }
+
     }
+
+    // Re-register ourselves.
+    lmp_chan_register_recv (channel, get_default_waitset(), MKCLOSURE(default_handler, arg));
 }
 
 /**

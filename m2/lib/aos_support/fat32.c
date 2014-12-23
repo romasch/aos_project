@@ -302,11 +302,14 @@ static inline int min (int first, int second)
     }
 }
 
-errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen)
+
+errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void* buf, size_t *buflen)
 {
     uint32_t cluster_index = descriptor_to_cluster [file_descriptor];
     uint32_t file_size = descriptor_to_size [file_descriptor];
     debug_printf_quiet ("FD: %u, size: %u, Cluster index: %u, file size: %u, position %u\n", file_descriptor, size, cluster_index, file_size, position);
+
+    assert (*buflen >= size);
 
     errval_t error = SYS_ERR_OK;
     struct sector_stream stack_stream;
@@ -317,11 +320,8 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
 
     uint32_t file_index = 0;
     uint32_t chars_read = 0;
-    uint32_t buffer_size = min (file_size - position, size);
-    int8_t* buffer = malloc (buffer_size+1);
-    if (!buffer) {
-        error = LIB_ERR_MALLOC_FAIL;
-    }
+    int8_t* buffer = buf;
+    *buflen = min (file_size - position, size);
 
     // Skip sectors which are not interesting.
     while (!stream_is_finished (stream) && file_index + 512 < position && err_is_ok (error)) {
@@ -345,11 +345,6 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
         }
         file_index += 512;
         error = stream_next (stream);
-    }
-
-     if (err_is_ok (error)) {
-        *buf = buffer;
-        *buflen = buffer_size;
     }
     debug_printf_quiet ("fat32_read_file: %s\n", err_getstring (error));
     return error;

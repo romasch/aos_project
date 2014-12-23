@@ -62,13 +62,12 @@ errval_t fat32_close_file (uint32_t file_descriptor);
  * \param file_descriptor: The file identified by its descriptor.
  * \param position: Position where to read from.
  * \param size: Maximum number of bytes to read.
- * \param buf: Result parameter for the buffer.
- * \param buflen: Result parameter for the buffer length.
+ * \param buf: The buffer to be filled.
+ * \param buflen: In-Out parameter for the buffer length.
+ * Must be greater or equal to the size parameter.
  *
- * NOTE: In case of success, "buf" is allocated by this function.
- * It is the callers responsibility to free it afterwards.
  */
-errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void** buf, size_t *buflen);
+errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void* buf, size_t *buflen);
 
 /**
  * Read the contents of a directory.

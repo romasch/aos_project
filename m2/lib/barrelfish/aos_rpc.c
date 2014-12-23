@@ -553,26 +553,16 @@ errval_t aos_rpc_readdir(struct aos_rpc *chan, char* path, struct aos_dirent **d
     return error;
 }
 
-errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size, void** buf, size_t *buflen)
+// Read a chunk of a file that fits into the shared buffer.
+static errval_t aos_rpc_read_buffer_chunk (struct aos_rpc *chan, int fd, size_t position, size_t size, size_t *buflen)
 {
-    // Read previously opened file
     errval_t error = SYS_ERR_OK;
-
-    // We don't handle NULL pointers here.
-    assert (chan && buf && buflen);
-
-    if (chan -> shared_buffer == NULL) {
-        error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
-        debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
-    }
-
-    // TODO: We need to split read requests for file sizes which don't fit into the shared buffer.
-    assert (size <= chan -> shared_buffer_length);
-
-    struct lmp_message_args  args   ;
-    struct lmp_chan        * channel = &chan->channel;
-
+    struct lmp_message_args args;
+    struct lmp_chan* channel = &chan->channel;
     init_lmp_message_args(&args, channel);
+
+    assert (size <= chan->shared_buffer_length);
+    assert (buflen);
 
     args.message.words [0] = AOS_RPC_READ_FILE   ;
     args.message.words [1] = chan -> memory_descriptor;
@@ -590,17 +580,80 @@ errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size
 
         if (err_is_ok (error)) {
             uint32_t result_length = args.message.words[1];
-            *buf = malloc (result_length);
-            if (*buf) {
-                memcpy (*buf, chan->shared_buffer, result_length);
-                *buflen = result_length;
+            *buflen = result_length;
+        }
+    }
+    return error;
+}
+
+
+errval_t aos_rpc_read(struct aos_rpc *chan, int fd, size_t position, size_t size, void** buf, size_t *buflen)
+{
+    // Read previously opened file
+    errval_t error = SYS_ERR_OK;
+
+    // We don't handle NULL pointers here.
+    assert (chan && buf && buflen);
+
+    if (chan -> shared_buffer == NULL) {
+        error = aos_rpc_setup_shared_buffer (chan, SHARED_BUFFER_DEFAULT_SIZE_BITS);
+        debug_printf_quiet ("Initialized buffer: %s\n", err_getstring (error));
+    }
+
+    void* result_buffer = NULL;
+
+    uint32_t chunk_size = chan -> shared_buffer_length;
+    size_t chars_read = 0;
+    uint32_t chunk_index = 0;
+    bool finished = false;
+
+    while (chars_read < size && !finished && err_is_ok (error)) {
+
+        uint32_t next_position = position + (chunk_index * chunk_size);
+        uint32_t next_size = (chunk_size < (size - chunk_size*chunk_index)
+            ? chunk_size
+            : (size - chunk_size*chunk_index));
+
+        size_t chunk_chars_read = 0;
+        error = aos_rpc_read_buffer_chunk (chan, fd, next_position, next_size, &chunk_chars_read);
+
+        if (err_is_ok (error)) {
+
+            // Enlarge result buffer.
+            void* test_buf = NULL;
+            if (chars_read == 0) {
+                test_buf = malloc (chunk_chars_read);
+            } else {
+                test_buf = realloc (result_buffer, chars_read + chunk_chars_read);
+            }
+
+            // Copy file chunk.
+            if (test_buf) {
+                result_buffer = test_buf;
+                memcpy (result_buffer+chars_read, chan->shared_buffer, chunk_chars_read);
+
+                // Update indices.
+                chunk_index++;
+                chars_read += chunk_chars_read;
+                if (chunk_chars_read < chunk_size) {
+                    finished = true;
+                }
             } else {
                 error = LIB_ERR_MALLOC_FAIL;
             }
-
         }
     }
 
+    if (err_is_fail (error)) {
+        free (result_buffer);
+    } else {
+        if (buf) {
+            *buf = result_buffer;
+        }
+        if (buflen) {
+            *buflen = chars_read;
+        }
+    }
     return error;
 }
 

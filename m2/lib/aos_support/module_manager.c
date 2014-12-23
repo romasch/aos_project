@@ -1,10 +1,12 @@
 #include <aos_support/module_manager.h>
 
 #include <spawndomain/spawndomain.h>
+#include <barrelfish/aos_rpc.h>
 #include <barrelfish/aos_dbg.h>
 
 // Initial length of module cache
 #define MODULE_CACHE_CAPACITY 32
+#define MAX_BINARY_SIZE (16ul * 1024 * 1024) // 16 MB.
 
 static struct bootinfo* bootinfo;
 static struct module_info** module_cache;
@@ -47,6 +49,41 @@ errval_t module_manager_init (struct bootinfo* bi)
         error = LIB_ERR_MALLOC_FAIL;
     }
 
+    return error;
+}
+
+
+static struct aos_rpc* filesystem_channel = NULL;
+__attribute__((unused))
+static errval_t load_from_disk (char* domain_name, struct module_info** ret_module)
+{
+    errval_t error = SYS_ERR_OK;
+    int fd;
+
+    error = aos_rpc_open (filesystem_channel, domain_name, &fd);
+    if (err_is_ok (error)) {
+        void* buf = NULL;
+        size_t buflen;
+        error = aos_rpc_read (filesystem_channel, fd, 0, MAX_BINARY_SIZE, &buf, &buflen);
+
+        if (err_is_ok (error)) {
+
+            struct module_info* info = calloc (1, sizeof (struct module_info));
+            char* name = malloc (strlen (domain_name));
+
+            if (info && name) {
+                strcpy (name, domain_name);
+                info -> name = name;
+                info -> size = buflen;
+                info -> virtual_address = (uint32_t) buf;
+            } else {
+                free (buf);
+                free (info);
+                free (name);
+                error = LIB_ERR_MALLOC_FAIL;
+            }
+        }
+    }
     return error;
 }
 
@@ -107,12 +144,8 @@ errval_t module_manager_load (char* domain_name, struct module_info** ret_module
                     error = err_push(error, SPAWN_ERR_ELF_MAP);
                 }
             } else {
-                if (info) {
-                    free (info);
-                }
-                if (copied_name) {
-                    free (copied_name);
-                }
+                free (info);
+                free (copied_name);
                 error = LIB_ERR_MALLOC_FAIL;
             }
         } else {
