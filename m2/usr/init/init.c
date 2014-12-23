@@ -484,7 +484,8 @@ int main(int argc, char *argv[])
             }
         }
         // Initialize the filesystem.
-        err = spawn ("mmchs", NULL);
+        domainid_t filesystem_domain = 0;
+        err = spawn ("mmchs", &filesystem_domain);
         if (err_is_fail (err)) {
             debug_printf ("Error: Failed to spawn mmchs: %s\n", err_getstring (err));
         } else {

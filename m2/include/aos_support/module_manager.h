@@ -2,6 +2,7 @@
 #define MODULE_MANAGER_H
 
 #include <barrelfish/barrelfish.h>
+#include <barrelfish/aos_rpc.h>
 
 // Default prefix of module names on the pandaboard.
 #define BINARY_PREFIX "armv7/sbin/"

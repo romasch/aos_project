@@ -1,7 +1,6 @@
 #include <aos_support/module_manager.h>
 
 #include <spawndomain/spawndomain.h>
-#include <barrelfish/aos_rpc.h>
 #include <barrelfish/aos_dbg.h>
 
 // Initial length of module cache
@@ -53,14 +52,21 @@ errval_t module_manager_init (struct bootinfo* bi)
 }
 
 
+// TODO: We somehow need to initialize the filesystem channel.
+// Since we're (probably) in init, this might be tricky.
 static struct aos_rpc* filesystem_channel = NULL;
-__attribute__((unused))
+
 static errval_t load_from_disk (char* domain_name, struct module_info** ret_module)
 {
     errval_t error = SYS_ERR_OK;
+    return SPAWN_ERR_FIND_MODULE;
+
+    // TODO: The following code is untested.
     int fd;
+    assert (filesystem_channel);
 
     error = aos_rpc_open (filesystem_channel, domain_name, &fd);
+
     if (err_is_ok (error)) {
         void* buf = NULL;
         size_t buflen;
@@ -76,6 +82,9 @@ static errval_t load_from_disk (char* domain_name, struct module_info** ret_modu
                 info -> name = name;
                 info -> size = buflen;
                 info -> virtual_address = (uint32_t) buf;
+                if (ret_module) {
+                    *ret_module = info;
+                }
             } else {
                 free (buf);
                 free (info);
@@ -103,6 +112,12 @@ errval_t module_manager_load (char* domain_name, struct module_info** ret_module
 
     // We may need to load the module from the boot info struct.
     if (!found) {
+
+        // Load from disk if the name starts with a slash
+        if (domain_name [0] == '/') {
+            return load_from_disk (domain_name, ret_module);
+        }
+
         // TODO: A more graceful recovery from buffer overflow attacks...
         assert (strlen (domain_name) < 128);
 
