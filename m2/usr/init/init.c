@@ -38,10 +38,8 @@ coreid_t get_core_id (void)
 struct lmp_chan* services [aos_service_guard];
 
 // Keeps track of FIND_SERVICE requests.
-// TODO: We need a dynamic structure, or at least prevent buffer overflows.
 #define MAX_FIND_REQUESTS 100
 static struct lmp_chan* find_request [MAX_FIND_REQUESTS];
-static int find_request_index = 0;
 
 /**
  * Initialize some data structures.
@@ -187,19 +185,34 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
 
             // find correct server channel
             uint32_t requested_service = message -> words [1];
-            struct lmp_chan* serv = services [requested_service];
+            if (0 <= requested_service && requested_service < aos_service_guard) {
+                struct lmp_chan* serv = services [requested_service];
 
-            if (serv != NULL) {
-                // generate new ID
-                uint32_t id = find_request_index;
-                find_request_index++;
-                // store current channel at ID
-                find_request [id] = channel;
-                // generate AOS_ROUTE_REQUEST_EP request with ID.
-                lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, id);
+                if (serv != NULL) {
+                    // generate new ID
+                    bool found = false;
+                    for (int i = 0; i < MAX_FIND_REQUESTS && !found; i++) {
+
+                        if (find_request [i] == NULL) {
+                            found = true;
+                            // store current channel at ID
+                            find_request [i] = channel;
+                            // generate AOS_ROUTE_REQUEST_EP request with ID.
+                            lmp_chan_send2 (serv, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, i);
+                        }
+                    }
+                    if (!found) {
+                        // No free space to allocate a find request ID.
+                        // This is very rare...
+                        lmp_chan_send1 (channel, 0, NULL_CAP, -1); // TODO: Proper error value
+                    }
+                } else {
+                    // Service is not registered.
+                    lmp_chan_send1 (channel, 0, NULL_CAP, -1); // TODO: proper error value
+                }
             } else {
-                // Service is unknown. Send error back.
-                lmp_chan_send1 (channel, 0, NULL_CAP, -1); // TODO: proper error value
+                // Invalid service identifier.
+                lmp_chan_send1 (channel, 0, NULL_CAP, AOS_ERR_LMP_INVALID_ARGS);
             }
             break;
         case AOS_ROUTE_DELIVER_EP:;
@@ -208,7 +221,8 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             errval_t error_ret = message -> words [1];
             uint32_t req_id = message -> words [2];
             // lookup receiver channel at ID
-            struct lmp_chan* recv = find_request [req_id]; // TODO: delete id
+            struct lmp_chan* recv = find_request [req_id];
+            find_request [req_id] = NULL;
             // generate response with cap and error value
             lmp_chan_send1 (recv, 0, cap, error_ret);
             // Delete capability and reuse slot.
@@ -282,23 +296,27 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             if (domain && domain -> state == domain_info_state_running) {
                 domain -> state = domain_info_state_zombie;
 
+                // Revoke dispatcher and root cnode.
+
                 error = cap_revoke (domain -> dispatcher_capability);
 
                 if (err_is_ok (error)) {
                     error = cap_destroy (domain -> dispatcher_capability);
                 }
-                if (err_is_ok (error)) {
-                    error = cap_revoke (domain -> root_cnode_capability);
-                }
-                if (err_is_ok (error)) {
-                    error = cap_destroy (domain -> root_cnode_capability);
-                }
+                // TODO: Revoking the root cnode creates a problem in init.1 when no other domain is left.
+//                 if (err_is_ok (error)) {
+//                     error = cap_revoke (domain -> root_cnode_capability);
+//                 }
+//                 if (err_is_ok (error)) {
+//                     error = cap_destroy (domain -> root_cnode_capability);
+//                 }
+
                 // Send back an acknowledgement if it's not a self-kill.
                 if (channel != domain -> channel) {
                     lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
                 }
 
-                // Notify the observer about termination.
+                // Notify any observer about termination.
                 if (domain -> termination_observer) {
                     lmp_chan_send1 (domain -> termination_observer, 0, NULL_CAP, SYS_ERR_OK);
                     domain -> termination_observer = NULL;
