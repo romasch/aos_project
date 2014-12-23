@@ -453,7 +453,7 @@ static void start_shell (void)
 
 int main(int argc, char *argv[])
 {
-    errval_t error;
+    errval_t error = SYS_ERR_OK;
     
     led_channel    = aos_rpc_get_init_channel          ();
     pm_channel     = aos_rpc_get_init_channel          ();
@@ -466,11 +466,17 @@ int main(int argc, char *argv[])
     filesystem_channel = malloc (sizeof (struct aos_rpc));
     if (filesystem_channel) {
         struct capref fs_cap;
-
-        error = aos_find_service (aos_service_filesystem, &fs_cap); assert(err_is_ok(error));
-        error = aos_rpc_init     (filesystem_channel    ,  fs_cap); assert(err_is_ok(error));
-        error = aos_ping         (filesystem_channel    ,      42); assert(err_is_ok(error));
+        error = aos_find_service (aos_service_filesystem, &fs_cap);
+        if (err_is_ok (error)) {
+            error = aos_rpc_init (filesystem_channel, fs_cap);
+        }
+    } else {
+        error = LIB_ERR_MALLOC_FAIL;
     }
+    if (err_is_fail (error)) {
+        debug_printf ("ERROR: Connection to filesystem could not be established: %s\n", err_getstring (error));
+    }
+
 
     current_dir[0] = '/' ;
     current_dir[1] = '\0';

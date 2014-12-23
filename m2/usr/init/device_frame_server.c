@@ -67,7 +67,7 @@ errval_t allocate_device_frame (lpaddr_t physical_base, uint8_t size_bits, struc
     );
 
     // Check if allocation was successful.
-    assert (ret_base == physical_base);
+//     assert (ret_base == physical_base);
 
     if (err_is_fail (error)) {
         debug_printf ("allocate_device_frame: %s\n", err_getstring (error));

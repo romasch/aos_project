@@ -38,7 +38,7 @@ coreid_t get_core_id (void)
 struct lmp_chan* services [aos_service_guard];
 
 // Keeps track of FIND_SERVICE requests.
-// TODO: use a system that supports removal as well.
+// TODO: We need a dynamic structure, or at least prevent buffer overflows.
 #define MAX_FIND_REQUESTS 100
 static struct lmp_chan* find_request [MAX_FIND_REQUESTS];
 static int find_request_index = 0;
@@ -272,25 +272,40 @@ static void my_handler (struct lmp_chan* channel, struct lmp_recv_msg* message, 
             lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
             break;
         case AOS_RPC_KILL:;
-            // TODO: error handling;
+            // TODO: Find a way to get back frames and device frames.
             uint32_t pid_to_kill = message -> words [1];
             debug_printf_quiet ("Got AOS_RPC_KILL: %u\n", pid_to_kill);
-            // TODO: Check if this is a self-kill. If yes sending a message is unnecessary.
+
             domain = get_domain_info (pid_to_kill);
-            lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
 
-//             domain -> name[0] = '\0';
-            domain -> state = domain_info_state_zombie;
-            error = cap_revoke (domain -> dispatcher_frame);
-            error = cap_destroy (domain -> dispatcher_frame);
+            // Users can only kill running domains.
+            if (domain && domain -> state == domain_info_state_running) {
+                domain -> state = domain_info_state_zombie;
 
-            // Notify the observer about termination.
-            if (domain -> termination_observer) {
-                lmp_chan_send1 (domain -> termination_observer, 0, NULL_CAP, SYS_ERR_OK);
-                domain -> termination_observer = NULL;
+                error = cap_revoke (domain -> dispatcher_capability);
+
+                if (err_is_ok (error)) {
+                    error = cap_destroy (domain -> dispatcher_capability);
+                }
+                if (err_is_ok (error)) {
+                    error = cap_revoke (domain -> root_cnode_capability);
+                }
+                if (err_is_ok (error)) {
+                    error = cap_destroy (domain -> root_cnode_capability);
+                }
+                // Send back an acknowledgement if it's not a self-kill.
+                if (channel != domain -> channel) {
+                    lmp_chan_send1 (channel, 0, NULL_CAP, SYS_ERR_OK);
+                }
+
+                // Notify the observer about termination.
+                if (domain -> termination_observer) {
+                    lmp_chan_send1 (domain -> termination_observer, 0, NULL_CAP, SYS_ERR_OK);
+                    domain -> termination_observer = NULL;
+                }
+            } else {
+                lmp_chan_send1 (channel, 0, NULL_CAP, AOS_ERR_LMP_INVALID_ARGS);
             }
-
-            // TODO: properly clean up processor, i.e. its full cspace.
             break;
 
         case AOS_RPC_WAIT_FOR_TERMINATION:;

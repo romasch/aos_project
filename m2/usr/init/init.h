@@ -39,8 +39,9 @@ struct domain_info
     // TODO: Storing the full name of a domain would be nice, although it complicates management.
     char name[MAX_PROCESS_NAME_LENGTH + 1];
 
-    // The dispatcher frame of the domain.
-    struct capref dispatcher_frame;
+    // The dispatcher and root cnode capabilities of the domain.
+    struct capref dispatcher_capability;
+    struct capref root_cnode_capability;
 
     // The current state (running, zombie etc...)
     enum domain_info_state state;

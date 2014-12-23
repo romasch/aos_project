@@ -42,7 +42,7 @@ static errval_t allocate_entry (uint32_t* result_index)
 
     // First try to find an unused spot.
     for (int i=0; i < max_domain_id() && !found; i++) {
-        if (get_domain_info(i) -> name[0] == '\0') {
+        if (get_domain_info(i) -> state == domain_info_state_free) {
             found = true;
             *result_index = i;
         }
@@ -76,33 +76,56 @@ struct domain_info* get_domain_info (domainid_t id)
 }
 
 
+/// Allocate 'destination' and copy 'source' into it.
+static errval_t copy_capability (struct capref* destination, struct capref source)
+{
+    errval_t error = slot_alloc (destination);
+
+    if (err_is_ok (error)) {
+
+        error = cap_copy (*destination, source);
+
+        // Need to clean up if copy failed.
+        if (err_is_fail (error)) {
+            error = err_push (error, slot_free (*destination));
+        }
+    }
+    return error;
+}
+
 /**
  * Spawn a new domain with an initial channel to init.
  *
  * \arg domain_name: The name of the new process. NOTE: Name should come
  * without path prefix, i.e. just pass "memeater" instead of "armv7/sbin/memeater".
  *
- * \arg ret_channel: Return parameter for allocated channel. May be NULL.
+ * \arg domain_id: ID of the new domain.
  */
-static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struct capref* ret_dispatcher, struct lmp_chan** ret_channel)
-{
-    //DBG: Uncomment if you really need it ==> debug_printf("Spawning new domain: %s...\n", domain_name);
-    errval_t error = SYS_ERR_OK;
+static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id)
 
-    // Struct to keep track of new domains cspace, vspace, etc...
-    struct spawninfo new_domain;
-    memset (&new_domain, 0, sizeof (struct spawninfo));
-    new_domain.domain_id = domain_id;
+{
+    errval_t error = SYS_ERR_OK;
 
     // Find the module.
     struct module_info* info;
     error = module_manager_load (domain_name, &info);
 
+    // Early exit if module not found.
+    if (err_is_fail (error)) {
+        return error;
+    }
+
+    assert (info != NULL);
+
+    // Spawninfo struct filled by spawn_arch_load().
+    struct spawninfo new_domain;
+    memset (&new_domain, 0, sizeof (struct spawninfo));
+    new_domain.domain_id = domain_id;
+
+
     if (err_is_ok (error)) {
 
-        assert (info != NULL);
-
-            // Set up default arguments.
+        // Set up default arguments.
         // TODO: Support user-provided arguments.
         char* argv [] = {domain_name, NULL};
         char* envp [] = {NULL};
@@ -122,16 +145,17 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
         );
     }
 
-    // Set data structures.
-    if (err_is_ok(error) && ret_dispatcher) {
-        // TODO; error handling. Also, it may be possible to not delete new_domain.dcb
+    // Set domain info data structure.
+    struct domain_info* domain_data = get_domain_info (domain_id);
+    if (err_is_ok (error)) {
         get_dispatcher_generic (new_domain.handle)->domain_id = domain_id;
-        slot_alloc (ret_dispatcher);
-        cap_copy (*ret_dispatcher, new_domain.dcb);
-    } else {
-        return error;
+        error = copy_capability ( &(domain_data->dispatcher_capability), new_domain.dcb);
+    }
+    if (err_is_ok (error)) {
+        error = copy_capability ( &(domain_data->root_cnode_capability), new_domain.rootcn_cap);
     }
 
+    // Allocate an LMP channel between init and the new domain.
     struct lmp_chan* initial_channel;
     if (err_is_ok (error)) {
         error = create_channel (&initial_channel);
@@ -145,10 +169,7 @@ static errval_t spawn_with_channel (char* domain_name, uint32_t domain_id, struc
 
         error = cap_copy(init_remote_cap, initial_channel->local_cap);
 
-        if (ret_channel) {
-            *ret_channel = initial_channel;
-        }
-
+        domain_data -> channel = initial_channel;
     }
 
     // Make the domain runnable
@@ -179,9 +200,8 @@ errval_t spawn (char* name, domainid_t* ret_id)
     if (err_is_ok (error)) {
         struct domain_info* domain = get_domain_info (idx);
 
-        error = spawn_with_channel (name, idx,
-                    &(domain -> dispatcher_frame),
-                    &(domain -> channel));
+        error = spawn_with_channel (name, idx);
+
         if (err_is_ok(error)) {
             strncpy(domain -> name, name, MAX_PROCESS_NAME_LENGTH);
             domain -> name[MAX_PROCESS_NAME_LENGTH] = '\0';
