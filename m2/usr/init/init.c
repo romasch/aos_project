@@ -22,6 +22,9 @@
 #include <aos_support/shared_buffer.h>
 #include <aos_support/module_manager.h>
 
+// Forward declaration
+static errval_t enable_elf_loading (struct lmp_chan* fs_chan);
+
 static struct bootinfo *bi;
 struct bootinfo* get_bootinfo (void)
 {
@@ -401,6 +404,8 @@ static errval_t initep_setup (void)
     return err;
 } //*/
 
+
+
 __attribute__((unused))
 static struct thread* ikcsrv;
 
@@ -492,6 +497,7 @@ int main(int argc, char *argv[])
             while (services [aos_service_filesystem] == NULL) {
                 event_dispatch (get_default_waitset());
             }
+            enable_elf_loading (services[aos_service_filesystem]);
         }
         debug_printf_quiet ("initialized core services\n");
 
@@ -509,4 +515,45 @@ int main(int argc, char *argv[])
 
     debug_printf ("Init returned: %s.\n", err_getstring (err));
     return EXIT_SUCCESS;
+}
+
+// ELF loading setup code.
+// This is a bit hacky, but it should work.
+
+static struct capref fs_client_cap;
+static struct aos_rpc fs_client_channel;
+
+static void fs_alloc_handler (void* arg)
+{
+    debug_printf_quiet ("Handling LMP message...\n");
+    errval_t error = SYS_ERR_OK;
+    struct lmp_chan* channel = (struct lmp_chan*) arg;
+    struct lmp_recv_msg message = LMP_RECV_MSG_INIT;
+    struct capref capability;
+
+    // Retrieve capability and arguments.
+    error = lmp_chan_recv(channel, &message, &capability);
+
+    // Reallocate a slot if we just received a capability.
+    if (err_is_ok (error) && !capref_is_null (capability)) {
+        lmp_chan_alloc_recv_slot (channel);
+        fs_client_cap = capability;
+    } else {
+        fs_client_cap = NULL_CAP;
+    }
+}
+
+// TODO: Error handling!
+static errval_t enable_elf_loading (struct lmp_chan* fs_chan)
+{
+    errval_t error = SYS_ERR_OK;
+    error = lmp_chan_deregister_recv (fs_chan);
+    error = lmp_chan_register_recv (fs_chan, get_default_waitset(), MKCLOSURE (fs_alloc_handler, fs_chan));
+    error = lmp_chan_send2 (fs_chan, 0, NULL_CAP, AOS_ROUTE_REQUEST_EP, 0);
+    error = event_dispatch (get_default_waitset());
+    assert (!capref_is_null (fs_client_cap));
+    error = aos_rpc_init (&fs_client_channel, fs_client_cap);
+    error = lmp_chan_register_recv (fs_chan, get_default_waitset(), MKCLOSURE (get_default_handler(), fs_chan));
+    module_manager_enable_filesystem (&fs_client_channel);
+    return error;
 }

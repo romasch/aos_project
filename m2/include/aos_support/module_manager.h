@@ -28,6 +28,13 @@ struct module_info {
 errval_t module_manager_init (struct bootinfo* bi);
 
 /**
+ * Enable ELF loading from the file system.
+ *
+ * \param fs_channel: The channel to the file system driver.
+ */
+void module_manager_enable_filesystem (struct aos_rpc* fs_channel);
+
+/**
  * Load a module from the module cache or the bootinfo struct.
  *
  * \param domain_name: The name of the domain without prefix.

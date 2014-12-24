@@ -56,16 +56,24 @@ errval_t module_manager_init (struct bootinfo* bi)
 // Since we're (probably) in init, this might be tricky.
 static struct aos_rpc* filesystem_channel = NULL;
 
+void module_manager_enable_filesystem (struct aos_rpc* fs_channel)
+{
+    filesystem_channel = fs_channel;
+}
+
 static errval_t load_from_disk (char* domain_name, struct module_info** ret_module)
 {
-    errval_t error = SYS_ERR_OK;
-    return SPAWN_ERR_FIND_MODULE;
+    errval_t error = module_cache_resize ();;
 
-    // TODO: The following code is untested.
+    if (!filesystem_channel) {
+        error = SPAWN_ERR_FIND_MODULE;
+    }
+
     int fd;
-    assert (filesystem_channel);
 
-    error = aos_rpc_open (filesystem_channel, domain_name, &fd);
+    if (err_is_ok (error)) {
+        error = aos_rpc_open (filesystem_channel, domain_name, &fd);
+    }
 
     if (err_is_ok (error)) {
         void* buf = NULL;
@@ -82,6 +90,9 @@ static errval_t load_from_disk (char* domain_name, struct module_info** ret_modu
                 info -> name = name;
                 info -> size = buflen;
                 info -> virtual_address = (uint32_t) buf;
+                module_cache [module_cache_count] = info;
+                module_cache_count++;
+
                 if (ret_module) {
                     *ret_module = info;
                 }
@@ -170,4 +181,3 @@ errval_t module_manager_load (char* domain_name, struct module_info** ret_module
     }
     return error;
 }
-
