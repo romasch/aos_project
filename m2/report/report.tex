@@ -142,7 +142,7 @@ The data structure of choice to represent the page table structure is a two-leve
 Currently we only store the capability to the page tables and whether a certain page has been allocated at some point.
 We don't yet store any flags, pointers to a swap file or other metadata, but it would be easy to add this information.
 
-Frame management is a bit more complex because we always allocate frames of 1 MiB.
+Frame management is a bit more complex, because we always do allocations of 1 MiB.
 That way we can avoid an IPC call for every single page fault, but we also have to keep track of free and allocated space within a frame.
 The \lstinline!struct frame_list! manages this information for a single frame.
 To support the last use case it also keeps track of the actual pages stored on this frame.
@@ -161,7 +161,7 @@ An implementation would have to do the following:
 The data structures used to track frames and page tables need some form of dynamic memory management.
 Unfortunately however we can't use malloc/free in our paging implementation, because this memory is not initially mapped.
 Therefore we used slab allocators (from \filepath{include/barrelfish/slab.h}) to manage the memory needed by these data structures.
-The feature \lstinline!memory_refill! in our paging code is used to enlarge the pool of usable memory if the slab allocators run out of space.
+The \lstinline!memory_refill! function in our paging code is used to enlarge the pool of usable memory if the slab allocators run out of space.
 
 \subsection{Assessment}
 
@@ -197,9 +197,11 @@ To support writing code on the client side we implemented the feature \lstinline
 sends a request to the server, waits for a reply, and copies the receive arguments back into the struct.
 That way we could avoid some code duplication for every remote procedure call.
 
-Some servers provide core system services. Init for example provides RAM, and the serial\_driver provides I/O.
-We therefore provide some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
-The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
+Some servers provide core system services which need to be available in every program.
+Init for example provides RAM, and the serial driver provides I/O.
+We therefore set up some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
+The channels can be accessed with functions defined in \filepath{aos\_rpc.h} (see Section \ref{sec:getting-started}).
+% The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
 
 \subsection{Connection setup and name service}
 
@@ -215,19 +217,19 @@ When a client wants to find a particular service, it sends a request to init, an
 This was a bit tricky to implement, because we only allow one-to-one connections, so init first has to request a new endpoint from the (registered) server.
 Init shouldn't mix the reply however with some other request from another domain, therefore we had to break our usual send-reply protocol and plan this interaction carefully.
 
-In chronological order, this is what happens when a domain wants to find, for example, the serial driver:
+In a step-by-step fashion this is what happens when a domain wants to find, for example, the serial driver:
 
 \begin{itemize}
  \item The client sends an \lstinline!AOS_RPC_FIND_SERVICE! with the enum constant of the serial driver to init.
  \item Init uses a new request ID (a ``cookie'') and remembers the channel that sent the request.
- \item Init checks if the serial driver is registered and sends an \lstinline!AOS_ROUTE_REQUEST_EP!.
- This call includes the previously generated request ID.
+ \item Init checks if the serial driver is registered. 
+ If this is the case it sends an \lstinline!AOS_ROUTE_REQUEST_EP! to it, which includes the previously generated request ID.
  \item The serial driver handles the enpoint request call by creating a new channel.
- It replies to init with an \lstinline!AOS_ROUTE_DELIVER_EP! which contains the new endpoint and the unchanged request ID as arguments.
+ It replies to init with an \lstinline!AOS_ROUTE_DELIVER_EP! containing the new endpoint and the unchanged request ID as arguments.
  Note that this RPC call doesn't follow the usual send-reply style message exchange, because the reply contains a message type argument.
  \item Thanks to the special reply format init can handle the request like any other LMP message.
  When receiving the \lstinline!AOS_ROUTE_DELIVER_EP!, init retrieves the channel that initially sent the \lstinline!AOS_RPC_FIND_SERVICE! request using the request ID and forwards the endpoint.
- \item The client domain wakes up again receives the new endpoint, which it can then use to establish a direct connection to the serial driver.
+ \item The client domain wakes up again receives the new endpoint, which it can then use to establish a direct connection.
 \end{itemize}
 
 
@@ -383,7 +385,7 @@ As a result any application is able to use traditional C-like IO with our serial
 \label{sec:process-management}
 
 Spawning and managing domains is done in init.
-The relevant code can be found in \filepath{usr/init/process\_manager.c}, \filepath{usr/init/main.c} and \filepath{lib/aos\_support/module\_manager.c}.
+The code can be found in \filepath{usr/init/process\_manager.c}, \filepath{usr/init/main.c} and \filepath{lib/aos\_support/module\_manager.c}.
 The latter keeps track of the modules shipped with the multiboot image and maps them into init's address space.
 
 The process manager is responsible to spawn a new domain and keep track of all running domains.
@@ -397,21 +399,21 @@ The function does all the steps required to spawn a new domain:
  \item Setting up the Dispatcher, CSpace and VSpace.
  \item Parse and relocate the ELF image.
  \item Create the channel between init and the new domain.
- \item Store relevant data in the \lstinline!domain_info! struct.
+ \item Store all relevant data in the \lstinline!domain_info! struct.
  \item Make the domain runnable.
 \end{itemize}
 
 The process manager maintains an array of \lstinline!domain_info! structs to keep track of all spawned domains.
 The array index serves as a unique domain identifier.
-If the initial length of the array is insufficient it can be dynamically grown, so we don't have a hard limit on the number of possible domains.
+If the initial length of the array is insufficient it can be dynamically grown, which means we don't have a hard limit on the number of possible domains.
 The \lstinline!ps! command dumps the name and domain ID of every domain stored within the array.
 
 \subsection {Domain Teardown}
 
-Tearing down a domain is challenging in barrelfish.
+Tearing down a domain is challenging in Barrelfish.
 The first issue we had to solve is to realize \emph{when} a domain needs to be cleaned up, i.e. we needed to get some notification that a domain has stopped running.
 To solve this problem we added a new IPC call \lstinline!AOS_RPC_KILL! which can be used to kill a domain, given a domain ID.
-We then adapted \lstinline!libc_exit! in \filepath{lib/barrelfish/init.c} to perform this call with its own ID (i.e. the domain commits suicide).
+We then adapted \lstinline!libc_exit! in \filepath{lib/barrelfish/init.c} to perform this call with its own ID (or in other words: the domain commits suicide).
 
 Init therefore gets a notification that some domain wants to be killed.
 It can then revoke the dispatcher capability to make the domain unrunnable.
@@ -453,9 +455,10 @@ Compared to the upstream mechanism we implemented some simplifications however, 
 We also adapted the code a bit to our own data structures.
 
 \subsection{Low-level mechanisms}
+\label{sec:low-level-mechanisms}
 
 To start the second core one has to call the \lstinline!sys_boot_core! system call, which eventually executes \lstinline!start_aps_arm_start! in the first kernel.
-Within this function there's no magic going on - it just writes the start address for the second core to a regsiter and issues an interrupt.
+Within this function there's no magic going on - it just writes the start address for the second core to a register and issues an interrupt.
 
 The real magic happens in \lstinline!arch_init! in \filepath{kernel/arch/omap44xx/init.c} and  \lstinline{arm_kernel_startup} in \filepath{kernel/arch/omap44xx/startup\_arch.c}.
 In \lstinline!arch_init! we set up the \lstinline!global! struct which contains data to be shared between both kernels.
@@ -466,72 +469,75 @@ In \lstinline!arm_kernel_startup! we do a static split of the available physical
 Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.
 Finally, we also create the capability to the shared frame in this functions and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
 
-\subsection{Inter-kernel communication}
-	Inter-kernel communication (IKC) is new type of kernel communication subsystem introduced by multikernel operating system design.
-	Like inter-process communication links independent and isolated processes running in the same OS environment, IKC links independent and isolated nodes of multi-kernel operating system located on the same machine into a single system.
-	These nodes are independent on isolated due to the fact that all computer system resources (mainly CPU and memory) are logically split between kernels and each kernel manages and uses its own system resources. 
-	Inter-kernel communication implements an inter-kernel communication channel abstraction on the base of shared memory of computer system, because memory is the fastest medium between CPU cores on computer systems with shared memory.
+\subsection{Inter-Kernel Communication}
+	Inter-kernel communication (IKC) is a new type of communication subsystem introduced by the multikernel operating system design.
+	Like inter-process communication links independent and isolated domains running in the same OS node, IKC links independent and isolated nodes in a multi-kernel operating system located on the same machine to a single system.
+	These nodes are isolated due to the fact that all computer system resources (mainly CPU and memory) are logically split between kernels and each kernel manages and uses its own system resources. 
+	Inter-kernel communication implements a communication channel using shared memory, because this is the fastest to communicate between CPUs on the same machine.
 	
-	In the context of the project master-slave communication model was chosen for IKC organization. 
-	Kernel running on CPU 0 (here and later we will use terms CPU and core interchangeably, because from the point of view of this project and from the point of view of software development in general multiprocessor system doesn't differ from the multicore-processor based system), which is a bootstrap processor, plays role of master kernel and kernel which can be launched on CPU 1 plays the role of slave kernel.
+	In the context of the project a master-slave communication model was chosen for IKC. 
+	The kernel running on Core 0,
+	%(here and later we will use terms CPU and core interchangeably, because from the point of view of this project and from the point of view of software development in general multiprocessor system doesn't differ from the multicore-processor based system), 
+	which is a bootstrap processor, plays role of the master whereas the kernel on Core 1 is the slave.
 	
-	During spawning the second kernel IKC communication channel established between kernels on the shared memory region of size 4Kb allocated specially for that purposes.
-	Communication over this channel is driven by communication drivers, which control data exchange over it.
-	On both sides the `Init' processes plays the role of IKC drives, but the behavior of master and save differs.
-	Communication can be initiated only by master kernel where main thread of the `Init' process by request send messages over channel and waits for reply like a caller in the RPC call.
-	On the slave side communication is handled by special thread of the `Init' process, which periodically monitors new messages in channel.
-	It behaves like a callee in RPC call. 
-	It receives message, handles it sends reply back to the master kernel.
-	In the current project IKC server thread of the slaves `Init' process handles only one type of request: spawning of the new process from the binary packed into boot image.
+	When spawning the second kernel an IKC communication channel is established between kernels.
+	We're using the reserved shared memory region described in Section \ref{sec:low-level-mechanisms} for that purpose.
+	Communication over this channel is handled by communication drivers which control the data exchange.
 	
-	IKC channel implemented is a full-duplex strictly-ordered channel for fixed size messages and FIFO service discipline. 
-	IKC communication channel consist of two simplex subchannels with size 2Kb, one of which is used for message passing from master to slave kernel and another one for message passing in the opposite direction (Look at the Figure \ref{fig:ikc}).
-	Both subchannels can be used concurrently in the same time. 
+	On both sides \emph{init} plays the role of IKC driver, but the behavior of master and slave differs.
+	Communication can be initiated only by \emph{init} on the master kernel, where the main thread sends messages over channel and waits for a reply like a usual RPC call.
+	
+	On the slave side communication is handled by a special listener thread within \emph{init} which polls for new messages in the channel.
+	The behaviour is similar to the server side of an RPC call: 
+	It receives a message, handles it, sends a reply, and goes back to polling. 
+	Currently the IKC server thread of the slave \emph{init} domain handles only one type of request: spawning new domains.
+	
+	The IKC channel is implemented as a full-duplex strictly-ordered channel for fixed size messages and FIFO service discipline. 
+	The channel consist of two unidirectional subchannels with size 2Kb, one of which is used for messages from master to slave and the other one for messages in the opposite direction (look at Figure \ref{fig:ikc}).
+	Both subchannels can be used concurrently at the same time.
 	
 	\begin{figure}[ht]
 		\centering
    		\includegraphics[width=\textwidth]{IKC_Structure.png}
-		\caption{Inter-Kernel Communication Organization}
+		\caption{Inter-Kernel Communication Channel Design}
     		\label{fig:ikc}
 	\end{figure} 
 		
-	There are three conceptual operations supported by channel:
+	There are three operations supported by channel:
 	\begin{enumerate}
-		\item Push. Paste the message specified into the first free space in the send subchannel. 
-		\item Pop. Receives and removes the message from the recv subchannel.
-		\item Peek. Receives but not removes message from the recv subchannel.
+		\item Push: Put a message into the first free space in the send subchannel. 
+		\item Pop: Receive and remove a message from the receive subchannel.
+		\item Peek: Receive, but don't remove, a message from the receive subchannel.
 	\end{enumerate}
 	
-	Message size of the channel was chosen to be equal to 64 bytes. It was chosen that, because:
+	We chose to use a message size of 64 bytes. 
+	We used this size for the following reasons:
 	\begin{enumerate}
-		\item It is aligned to the cache line size. 
-		Each message covers exactly two cache lines. 
-		This property helps as to eliminate unwanted cache-line flip-flopping which reduce efficiency of communication. 
-		\item It is a power of two. 
-		That is mean that each subchannel contains 32 message slots which is also power of two. 
-		This property allows us to easily and efficiently represent channel internally as a ring buffer.
-		No one message can cross the border of the buffer, because channel size is divisible by message size and message size is fixed.
-		We can use integer overflow safely for read and write pointers tracking, because overflow will occur only in places of going back to the first slot of buffer.
-		All operation of multiplication, division and modulo operation will be optimized by compiler by bit shifting and masking, which will replace expensive (especially on ARM) arithmetical operations by simple and cheap analogs.
-		If be honest we even not sure that ARM CPU used by Pandaboard provides hardware instructions for these operations or it relies on compiler which will implement them in software.
-		In the same time we haven't checked that the expected behavior will be produced by compiler, because we haven't our binaries disassembled for explicit check (due to the lack of knowledge's of ARM assembler and appropriate disassembling software), but we sure that expected optimizations will be done, because it simple and well-known and this is exactly what we saw before for Microsoft Visual C++ compiler and IA-32 platform. 
-		\item This message size allows to fit one native intra-kernel RPC message into one IKC message.
-		\item Second cache line is almost unused for data transfer and last word of it used as a ready sign.
-		This allows us to eliminate cache line flip-flopping between writer and reader, because while writer will fill first cache line of the message without any distortion reader will constantly check the last word of second cache line and also without any distortion. 
-		When writer will have whole message flushed into channel, it will raise ready flag at the last word of second cache line of the message notifying reader that it can read the message safely now.
-		As a result only three cache line passes between cores will occur: 2 line from reader to writer, 2 line from writer to reader and finally 1 line from writer to reader.  
+		\item It is aligned to the cache line size, where each message covers exactly two cache lines. 
+		This property helps us to eliminate unwanted cache line flip-flopping which would reduce efficiency of communication.
+		\item It is a power of two, which means that each subchannel contains exactly 32 message slots, which is also power of two. 
+		This property allows us to easily and efficiently represent channels internally as a ring buffer.
+		No single message can cross the boundary of the buffer, because the channel size is divisible by the message size and the message size is fixed.
+		We can use integer overflow safely for read and write pointer tracking, because overflow will only occur in places of going back to the first slot of buffer. %TODO: Are you sure about that??
+		All multiplication, division and modulo operations should be optimized by compiler by bit shifting and masking, which will replace expensive (especially on ARM) arithmetical operations by simple and cheap equivalents.
+% 		If be honest we even not sure that ARM CPU used by Pandaboard provides hardware instructions for these operations or it relies on compiler which will implement them in software.
+% 		In the same time we haven't checked that the expected behavior will be produced by compiler, because we haven't our binaries disassembled for explicit check (due to the lack of knowledge's of ARM assembler and appropriate disassembling software), but we sure that expected optimizations will be done, because it simple and well-known and this is exactly what we saw before for Microsoft Visual C++ compiler and IA-32 platform. 
+		\item The message size allows to fit one LMP message into one IKC message.
+		\item The second cache line is not often used for data transfer, so we reserve the last word for a ready sign.
+		This allows us to reduce cache line flip-flopping between writer and reader, because the writer can fill the first cache line of the message without any distortion while the reader constantly checks the last word of second cache line. 
+		When the writer has written whole message into channel, it will raise the ready flag at the end of the second cache line, notifying reader that it can read the message safely now.
+% 		TODO: No - what if message size is bigger than one cache line (32 bytes)?
+% 		As a result only three cache line passes between cores will occur: 2 line from reader to writer, 2 line from writer to reader and finally 1 line from writer to reader.
 	\end{enumerate}
 	
-	Each endpoint of the channel uses pair of channel pointers: read and write. 
-	Read pointer if used for recv subchannel only and write pointer for send suchannel only.
-	Note that the read and write pointer of the same subchannel will belong to different cores and will be tracked independently.
-	They are not shared. 
+	Each endpoint of the channel uses a pair of channel pointers for receive and send. 
+	The receive pointer is used for receive subchannel, and vice versa.
+	Note that, for the same subchannel, the receive and send pointers are located on different cores and tracked independendly.
 	
-\todo {}
 
-- Spawning cores on low level.
-- Setup of ELF image
-- Communication between cores
+% - Spawning cores on low level.
+% - Setup of ELF image
+% - Communication between cores
 
 \section{FAT file system}
 
