@@ -599,7 +599,7 @@ We could not reuse the initial channel, because the client-server relationship i
 Using the normal \lstinline!aos_rpc_find_servie! infrastructure wasn't possible either because \emph{init} doesn't have a channel to itself, which was required by this function.
 Therefore the solution was to add some special setup code to create a new channel between init and the filesystem server.
 
-An ELF binary on disk can be executed by specifying the full path to the file.
+An ELF binary on disk is executed when giving the full file path to the shell.
 
 % - filesystem code in aos\_support/fat32.c
 % - handler in mmchs/filesystem\_server.c
