@@ -19,7 +19,7 @@
 % Appendix with extra title.
 % \usepackage [page] {appendix}
 % To include PNG files.
-% \usepackage{graphicx}
+\usepackage{graphicx}
 % Nice looking captions.
 \usepackage[font={footnotesize,sl}, labelfont=bf] {caption}
 % Include PDF pages.
@@ -317,7 +317,7 @@ The bulk transfer mechanism was a pretty late addition to the code base, therefo
 	Command running in the foreground mode suspends the shell until command executor process will be terminated and intercepts control over serial port channel.
 	Command running in background mode runs concurrently with the shell and without access to the serial port channel.
     	    	
-	 \section{Serial I/O}
+	 \subsection{Serial I/O}
 	 	The serial driver is a mediator between serial port connection and the rest of the rest of operating system. It is located in \filepath{usr/serial\_driver/}.
 	 	It have straightforward implementation due to the simplicity of the serial port management at least on the level of use which we have.
 	 	Driver didn't support buffering, interrupts, baud rate control etc. and relies to the preliminary port serial port initialization made by kernel during boot up.
@@ -422,10 +422,67 @@ In \lstinline!arm_kernel_startup! we do a static split of the available physical
 Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.
 Finally, we also create the capability to the shared frame in this functions and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
 
-\subsubsection{Cross core communication}
-
-
-
+\subsubsection{Inter-kernel communication}
+	Inter-kernel communication (IKC) is new type of kernel communication subsystem introduced by multikernel operating system design.
+	Like inter-process communication links independent and isolated processes running in the same OS environment, IKC links independent and isolated nodes of multi-kernel operating system located on the same machine into a single system.
+	These nodes are independent on isolated due to the fact that all computer system resources (mainly CPU and memory) are logically split between kernels and each kernel manages and uses its own system resources. 
+	Inter-kernel communication implements an inter-kernel communication channel abstraction on the base of shared memory of computer system, because memory is the fastest medium between CPU cores on computer systems with shared memory.
+	
+	In the context of the project master-slave communication model was chosen for IKC organization. 
+	Kernel running on CPU 0 (here and later we will use terms CPU and core interchangeably, because from the point of view of this project and from the point of view of software development in general multiprocessor system doesn't differ from the multicore-processor based system), which is a bootstrap processor, plays role of master kernel and kernel which can be launched on CPU 1 plays the role of slave kernel.
+	
+	During spawning the second kernel IKC communication channel established between kernels on the shared memory region of size 4Kb allocated specially for that purposes.
+	Communication over this channel is driven by communication drivers, which control data exchange over it.
+	On both sides the `Init' processes plays the role of IKC drives, but the behavior of master and save differs.
+	Communication can be initiated only by master kernel where main thread of the `Init' process by request send messages over channel and waits for reply like a caller in the RPC call.
+	On the slave side communication is handled by special thread of the `Init' process, which periodically monitors new messages in channel.
+	It behaves like a callee in RPC call. 
+	It receives message, handles it sends reply back to the master kernel.
+	In the current project IKC server thread of the slaves `Init' process handles only one type of request: spawning of the new process from the binary packed into boot image.
+	
+	IKC channel implemented is a full-duplex strictly-ordered channel for fixed size messages and FIFO service discipline. 
+	IKC communication channel consist of two simplex subchannels with size 2Kb, one of which is used for message passing from master to slave kernel and another one for message passing in the opposite direction (Look at the Figure \ref{fig:ikc}).
+	Both subchannels can be used concurrently in the same time. 
+	
+	\begin{figure}[ht]
+		\centering
+   		\includegraphics[width=\textwidth]{IKC_Structure.png}
+		\caption{Inter-Kernel Communication Organization}
+    		\label{fig:ikc}
+	\end{figure} 
+		
+	There are three conceptual operations supported by channel:
+	\begin{enumerate}
+		\item Push. Paste the message specified into the first free space in the send subchannel. 
+		\item Pop. Receives and removes the message from the recv subchannel.
+		\item Peek. Receives but not removes message from the recv subchannel.
+	\end{enumerate}
+	
+	Message size of the channel was chosen to be equal to 64 bytes. It was chosen that, because:
+	\begin{enumerate}
+		\item It is aligned to the cache line size. 
+		Each message covers exactly two cache lines. 
+		This property helps as to eliminate unwanted cache-line flip-flopping which reduce efficiency of communication. 
+		\item It is a power of two. 
+		That is mean that each subchannel contains 32 message slots which is also power of two. 
+		This property allows us to easily and efficiently represent channel internally as a ring buffer.
+		No one message can cross the border of the buffer, because channel size is divisible by message size and message size is fixed.
+		We can use integer overflow safely for read and write pointers tracking, because overflow will occur only in places of going back to the first slot of buffer.
+		All operation of multiplication, division and modulo operation will be optimized by compiler by bit shifting and masking, which will replace expensive (especially on ARM) arithmetical operations by simple and cheap analogs.
+		If be honest we even not sure that ARM CPU used by Pandaboard provides hardware instructions for these operations or it relies on compiler which will implement them in software.
+		In the same time we haven't checked that the expected behavior will be produced by compiler, because we haven't our binaries disassembled for explicit check (due to the lack of knowledge's of ARM assembler and appropriate disassembling software), but we sure that expected optimizations will be done, because it simple and well-known and this is exactly what we saw before for Microsoft Visual C++ compiler and IA-32 platform. 
+		\item This message size allows to fit one native intra-kernel RPC message into one IKC message.
+		\item Second cache line is almost unused for data transfer and last word of it used as a ready sign.
+		This allows us to eliminate cache line flip-flopping between writer and reader, because while writer will fill first cache line of the message without any distortion reader will constantly check the last word of second cache line and also without any distortion. 
+		When writer will have whole message flushed into channel, it will raise ready flag at the last word of second cache line of the message notifying reader that it can read the message safely now.
+		As a result only three cache line passes between cores will occur: 2 line from reader to writer, 2 line from writer to reader and finally 1 line from writer to reader.  
+	\end{enumerate}
+	
+	Each endpoint of the channel uses pair of channel pointers: read and write. 
+	Read pointer if used for recv subchannel only and write pointer for send suchannel only.
+	Note that the read and write pointer of the same subchannel will belong to different cores and will be tracked independently.
+	They are not shared. 
+	
 \todo {}
 
 - Spawning cores on low level.
