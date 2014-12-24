@@ -50,28 +50,65 @@
 This report provides documentation for the operating system which we built as part of the project in the Advanced Operating Systems course.
 The code is based on a stripped-down version of Barrelfish \cite {web:barrelfish}.
 
-\todo{ more introduction}
+This document is intended to describe the most important concepts and data structures in our code.
+The idea is to give a high-level overview over the individual modules and serve as a complement for the comments within the code.
+We will not however provide a detailed description of the API of every function, as this can be either looked up in the header file or generated with Doxygen\todoref.
+
+Section \ref{sec:getting-started} describes the required steps to compile the project and access basic system services.
+The remaining sections of the report describe the individual project milestones.
 
 \section{Getting started}
+\label{sec:getting-started}
 
-\begin{lstlisting}
+To be able to boot the operating system you need at least the following modules:
+\begin{itemize}
+ \item Kernel: armv7/sbin/cpu\_omap44xx
+ \item Init: armv7/sbin/init
+ \item Serial driver: armv7/sbin/serial\_driver
+ \item Shell: armv7/sbin/memeater
+ \item Filesystem: armv7/sbin/mmchs
+\end{itemize}
 
-void test_listings_package (void);
+It might be possible to run the project without a filesystem, but some commands fail.
+We also provide a set of optional applications:
+\begin{itemize}
+ \item Hello World application: armv7/sbin/hello\_world
+ \item Memory test: armv7/sbin/memtest
+ \item Server test: armv7/sbin/test\_domain
+ \item File Read Benchmark: armv7/sbin/fsb
+\end{itemize}
 
-void test_listings_package (void)
+Once the operating system has successfully booted control is transferred to a shell.
+A detailed list of available commands is described in Table \ref{tbl:icl}.
+Besides the builtin commands it is also possible to start the above optional applications by just typing their name without any prefix.
+
+To get a channel to a system service one has to call \lstinline!aos_find_service! and \lstinline!aos_rpc_init!.
+The channels to init and the serial driver are always available and can be retrieved with predefined functions.
+
+Listing \ref{listing:channel-setup} shows a very small program to set up RPC channels.
+
+\begin{lstlisting}[language=C, caption={Setup code for channels.}, captionpos=b, label=listing:channel-setup]
+#include <barrelfish/aos_rpc.h>
+
+struct aos_rpc* init_channel;
+struct aos_rpc* serial_channel;
+struct aos_rpc filesystem_channel;
+
+int main(int argc, char *argv[])
 {
-  uint32_t an_int;
-  char* a_string = "asdf";
-  for (int i=0; i<42; i++) {
-    printf (a_string);
-  }
+  // Get init and serial driver channel.
+  init_channel = aos_rpc_get_init_channel ();
+  serial_channel = aos_rpc_get_serial_driver_channel ();
+  
+  // Get the filesystem channel.
+  // NOTE: Error handling omitted.
+  struct capref fs_cap;
+  aos_find_service (aos_service_filesystem, &fs_cap);
+  aos_rpc_init (&filesystem_channel, fs_cap);
 }
 \end{lstlisting}
 
-
-\section {Modules}
-
-\subsection{Paging}
+\section{Paging}
 
 % 
 % - Intent: quick lookup of page table, ``unmap'' requests from memory server
@@ -101,7 +138,7 @@ To support the first use case we just keep track of the allocated range of virtu
 That way determining if a page fault is ``valid'' is very simple: 
 If it's in the range, everything is ok and we can map the page to a frame, and if not we abort due to an invalid address.
 
-The data structure of choice to represent the page table structure is a two-level array that mirrors the actual page tables in memory.
+The data structure of choice to represent the page table structure is a two-level array that mirrors the actual page tables.
 Currently we only store the capability to the page tables and whether a certain page has been allocated at some point.
 We don't yet store any flags, pointers to a swap file or other metadata, but it would be easy to add this information.
 
@@ -126,7 +163,7 @@ Unfortunately however we can't use malloc/free in our paging implementation, bec
 Therefore we used slab allocators (from \filepath{include/barrelfish/slab.h}) to manage the memory needed by these data structures.
 The feature \lstinline!memory_refill! in our paging code is used to enlarge the pool of usable memory if the slab allocators run out of space.
 
-\subsubsection{Assessment}
+\subsection{Assessment}
 
 Our initial design of the paging module turned out to be rather flexible.
 Over the course of the project, we only had to change small things, like adding another slab allocator for exception stacks of user-level threads 
@@ -139,7 +176,7 @@ There are some parts in the code that directly interacts with the paging library
 Supporting this would have required us to rewrite a lot of existing code, and that's why we didn't do it in the end.
 This in turn means that our current solution leaks virtual addresses, but we tried to reduce this as much as possible by reusing the ranges of virtual memory.
 
-\subsection{Local Message Passing}
+\section{Local Message Passing}
 
 The local message passing (LMP) system is mostly implemented in \filepath{lib/barrelfish/aos\_rpc.c} for the client side.
 Some generic server-side features are implemented in \filepath{lib/aos\_support/server.c}.
@@ -164,7 +201,7 @@ Some servers provide core system services. Init for example provides RAM, and th
 We therefore provide some predefined channels to these services which are initialized in \filepath{lib/barrelfish/init.c}.
 The channels can be retrieved with the functions \lstinline!aos_rpc_get_init_channel! and \lstinline!aos_rpc_get_serial_driver_channel!, respectively.
 
-\subsubsection{Connection setup and name service}
+\subsection{Connection setup and name service}
 
 In our LMP implementation we wanted to support direct channels between two domains.
 To do that we had to implement some additional functionality, in particular a simple name service and a mechanism to set up a new connection.
@@ -206,7 +243,7 @@ In chronological order, this is what happens when a domain wants to find, for ex
 % - predefined channels (provided by libbarrelfish): init, serial\_driver
 
 
-\subsubsection{Bulk transfer}
+\subsection{Bulk transfer}
 
 For a long time throughout the project we only had the basic message-passing communication model.
 Although this worked well, we always had to split an IPC call into several messages if the data to be transmitted exceeded the capacity of a single message.
@@ -221,7 +258,7 @@ The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, whe
 
 The bulk transfer mechanism was a pretty late addition to the code base, therefore not all RPC calls have been changed to make use of it yet.
 
-\subsection{Shell}
+\section{Shell}
 	Shell is a standard mean of communication and interaction between user and developed operating system.
 	In the same time it is the only user interface currently existing in OS.
 	 
@@ -317,7 +354,7 @@ The bulk transfer mechanism was a pretty late addition to the code base, therefo
 	Command running in the foreground mode suspends the shell until command executor process will be terminated and intercepts control over serial port channel.
 	Command running in background mode runs concurrently with the shell and without access to the serial port channel.
     	    	
-	 \subsection{Serial I/O}
+	 \section{Serial I/O}
 	 	The serial driver is a mediator between serial port connection and the rest of the rest of operating system. It is located in \filepath{usr/serial\_driver/}.
 	 	It have straightforward implementation due to the simplicity of the serial port management at least on the level of use which we have.
 	 	Driver didn't support buffering, interrupts, baud rate control etc. and relies to the preliminary port serial port initialization made by kernel during boot up.
@@ -335,7 +372,7 @@ The bulk transfer mechanism was a pretty late addition to the code base, therefo
 		In addition for convenience the libc was customized to use serial port driver as back end for the prinf and scanf families of functions.
 		As a result any application is able to use traditional C-like IO.
 
-\subsection{Process management}
+\section{Process management}
 \label{sec:process-management}
 
 Spawning and managing domains is done in init.
@@ -362,7 +399,7 @@ The array index serves as a unique domain identifier.
 If the initial length of the array is insufficient it can be dynamically grown, so we don't have a hard limit on the number of possible domains.
 The \lstinline!ps! command dumps the name and domain ID of every domain stored within the array.
 
-\subsubsection {Domain Teardown}
+\subsection {Domain Teardown}
 
 Tearing down a domain is challenging in barrelfish.
 The first issue we had to solve is to realize \emph{when} a domain needs to be cleaned up, i.e. we needed to get some notification that a domain has stopped running.
@@ -382,7 +419,7 @@ A domain can now issue an \lstinline!AOS_RPC_WAIT_FOR_TERMINATION! to get a noti
 The shell makes use of this facility to suspend itself during foreground tasks.
 And because we already had the \lstinline!AOS_RPC_KILL! call we could also very easily extend our shell to spawn process in the background and \emph{kill} them later.
 
-\subsubsection{Assessment}
+\subsection{Assessment}
 Our domain management code went through many refactorings, and we're still not quite happy.
 The main problem is to properly clean up a zombie domain.
 
@@ -399,16 +436,16 @@ With some more time we may have been able to find a solution, but it's certainly
 % - kill command to revoke dispatcher capability (background tasks)
 % - no further cleanup for zombie domains as for now
 
-\subsection{Mupltiple Cores}
+\section{Mupltiple Cores}
 
-\subsubsection{Preparing the kernel image}
+\subsection{Preparing the kernel image}
 
 The preparation of the kernel image is mostly done in \filepath{usr/init/cross\_core\_setup.c}.
 The implementation is heavily inspired\footnote{copy-pasted} from the upstream Barrelfish code base.
 Compared to the upstream mechanism we implemented some simplifications however, since we don't have to support more than two cores.
 We also adapted the code a bit to our own data structures.
 
-\subsubsection{Low-level mechanisms}
+\subsection{Low-level mechanisms}
 
 To start the second core one has to call the \lstinline!sys_boot_core! system call, which eventually executes \lstinline!start_aps_arm_start! in the first kernel.
 Within this function there's no magic going on - it just writes the start address for the second core to a regsiter and issues an interrupt.
@@ -422,7 +459,7 @@ In \lstinline!arm_kernel_startup! we do a static split of the available physical
 Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.
 Finally, we also create the capability to the shared frame in this functions and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
 
-\subsubsection{Inter-kernel communication}
+\subsection{Inter-kernel communication}
 	Inter-kernel communication (IKC) is new type of kernel communication subsystem introduced by multikernel operating system design.
 	Like inter-process communication links independent and isolated processes running in the same OS environment, IKC links independent and isolated nodes of multi-kernel operating system located on the same machine into a single system.
 	These nodes are independent on isolated due to the fact that all computer system resources (mainly CPU and memory) are logically split between kernels and each kernel manages and uses its own system resources. 
@@ -489,7 +526,7 @@ Finally, we also create the capability to the shared frame in this functions and
 - Setup of ELF image
 - Communication between cores
 
-\subsection{FAT file system}
+\section{FAT file system}
 
 The FAT filesystem is implemented in \filepath{aos\_support/fat32.c}, whereas the server and disk driver is located in \filepath{usr/mmchs/}.
 We only support read operations on a FAT filesystem, and we didn't try to improve the block driver as well.
@@ -520,7 +557,7 @@ An important internal function is \lstinline!find_node!.
 This function takes a path as an argument and tries to find a filesystem node (file or directory) with the given path.
 If found it returns the start cluster and the file size (if it is a file) of the node.
 
-\subsubsection{File management}
+\subsection{File management}
 
 File operations are done in the usual open-read-close cycle and identified by a file descriptor.
 When opening a file we call \lstinline!find_node! to search the filesystem for the file with the given path.
@@ -533,13 +570,13 @@ To send the byte buffer back to the client we make use of the bulk transfer mech
 
 When closing a file we just discard the information collected during the open phase.
 
-\subsubsection{Partition tables}
+\subsection{Partition tables}
 
 Due to the fact that Windows couldn't create an SD card without a partition table we had to add some rudimentary support for it.
 The filesystem server loads the partition table and looks at the first partition table entry.
 It then extracts the start block of the first partition and initializes the FAT driver with that information.
 
-\subsubsection{Assessment}
+\subsection{Assessment}
 \todo{Write assessment}
 
 % - filesystem code in aos\_support/fat32.c
@@ -548,7 +585,7 @@ It then extracts the start block of the first partition and initializes the FAT 
 % - some support for partition tables
 % - Performance improvements: sequential read? cached FAT? bulk transfer?
 
-\subsubsection{ ELF loading}
+\subsection{ ELF loading}
 
 \todo {Implement ELF loading}
 
