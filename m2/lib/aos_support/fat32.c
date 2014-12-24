@@ -30,6 +30,11 @@ static inline uint32_t get_int (void* buffer, uint32_t offset)
     return ((uint32_t*) buffer) [offset >> 2];
 }
 
+/**
+ * Sector stream struct.
+ * This struct encapsulates an iterator over file or directory
+ * entries within the FAT file system.
+ */
 struct sector_stream {
     struct fat32_config* config;
     uint32_t cluster_start;
@@ -49,6 +54,7 @@ static void stream_init (struct sector_stream* stream, struct fat32_config* conf
 // Forward declaration.
 static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index, uint32_t* result_sector);
 
+// Have we reached the end of the file or directory?
 static bool stream_is_finished (struct sector_stream* stream)
 {
     return (stream->current_cluster) >= 0x0FFFFFF8; //TODO: Define constant.
@@ -123,7 +129,10 @@ static errval_t fat_lookup (struct fat32_config* config, uint32_t cluster_index,
     return error;
 }
 
-
+/**
+ * Find a node in the filesystem.
+ * Returns AOS_ERR_FAT_NOT_FOUND if path is invalid.
+ */
 static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32_t* ret_cluster, uint32_t* ret_size)
 {
     debug_printf_quiet ("Find node %s\n", path);
@@ -144,10 +153,12 @@ static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32
     }
 
 
+    // Follow the path until we either find a matching entry or an invalid name.
     while (!end_of_path && err_is_ok (error)) {
         uint32_t fat_name_index = 0;
         char fat_name [12];
 
+        // Parse a single name and convert it to FAT file name convention.
         bool end_of_name = false;
         while (!end_of_name) {
             switch (path [path_index]) {
@@ -179,6 +190,8 @@ static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32
 
         if (fat_name [0] != ' ') {
 
+            // Try to find the entry with the previously generated name.
+
             debug_printf_quiet ("FAT name: ---%s---\n", fat_name);
             found_entry = false;
 
@@ -192,6 +205,7 @@ static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32
 
                 error = stream_load (stream, &sector);
 
+                // Iterate over directory entries.
                 for (int entry_index = 0; err_is_ok (error) && entry_index < DIRECTORY_ENTRIES && !found_entry && !early_stop; entry_index++) {
                     uint32_t base_offset = entry_index * 32;
 
@@ -259,11 +273,14 @@ static errval_t fat32_find_node (struct fat32_config* config, char* path, uint32
     return error;
 }
 
+
+/// State for file management.
 struct fat32_config* descriptor_to_config [1024];
 static uint32_t descriptor_to_size [1024];
 static uint32_t descriptor_to_cluster [1024];
 static uint32_t descriptor_count = 0;
 
+/// see header file
 errval_t fat32_open_file (struct fat32_config* config, char* path, uint32_t* file_descriptor)
 {
     assert (path != NULL && file_descriptor != NULL);
@@ -285,6 +302,7 @@ errval_t fat32_open_file (struct fat32_config* config, char* path, uint32_t* fil
     return error;
 }
 
+/// see header file
 errval_t fat32_close_file (uint32_t file_descriptor)
 {
     // TODO: Recycle file descriptors.
@@ -302,7 +320,7 @@ static inline int min (int first, int second)
     }
 }
 
-
+/// see header file
 errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size, void* buf, size_t *buflen)
 {
     uint32_t cluster_index = descriptor_to_cluster [file_descriptor];
@@ -350,7 +368,7 @@ errval_t fat32_read_file (uint32_t file_descriptor, size_t position, size_t size
     return error;
 }
 
-
+/// see header file
 errval_t fat32_read_directory (struct fat32_config* config, char* path, struct aos_dirent** entry_list, size_t* entry_count)
 {
     uint32_t cluster_index = 0;
@@ -379,6 +397,7 @@ errval_t fat32_read_directory (struct fat32_config* config, char* path, struct a
 
         error = stream_load (stream, &sector);
 
+        // Iterate over the directory entries.
         for (int entry_index = 0; entry_index < DIRECTORY_ENTRIES && err_is_ok (error) && !early_stop; entry_index++) {
 
             uint32_t base_offset = entry_index * 32;
@@ -469,12 +488,6 @@ errval_t fat32_read_directory (struct fat32_config* config, char* path, struct a
                     new_entry.size = file_size;
                     debug_printf_quiet ("Entry: %u, File. Attrib: %u. Name: %s. Cluster: %u. Size: %u\n", entry_index, attributes, new_entry.name, cluster_index_entry, file_size);
 
-                    // Uncomment to print file content:
-//                             char filebuf [512];
-//                             errval_t inner_error = fat32_driver_read_sector(cluster_to_sector_number (cluster_index_entry), filebuf);
-//                             assert (err_is_ok (inner_error));
-//                             debug_printf ("File contents:\n%s\n", filebuf);
-
                 }
 
                 result [count] = new_entry;
@@ -490,6 +503,7 @@ errval_t fat32_read_directory (struct fat32_config* config, char* path, struct a
     }
 
 
+    // Set the result parameters.
     if (err_is_fail (error) || entry_list == NULL || entry_count == NULL) {
         free (result);
     } else {
