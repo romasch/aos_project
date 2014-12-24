@@ -52,7 +52,7 @@ The code is based on a stripped-down version of Barrelfish \cite {web:barrelfish
 
 This document is intended to describe the most important concepts and data structures in our code.
 The idea is to give a high-level overview over the individual modules and serve as a complement for the comments within the code.
-We will not however provide a detailed description of the API of every function, as this can be either looked up in the header file or generated with Doxygen\todoref.
+We will not however provide a detailed description of the API of every function, as this can be either looked up in the header file or generated with Doxygen \cite{web:doxygen}.
 
 Section \ref{sec:getting-started} describes the required steps to compile the project and access basic system services.
 The remaining sections of the report describe the individual project milestones.
@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
 
 The paging code is mostly contained in \filepath{lib/barrelfish/paging.c} and the corresponding header file.
 The central element is the \lstinline!paging_state! struct.
-When desgining the data structure for the paging code we wanted to support the following functions in constant time:
+When designing the data structure for the paging code we wanted to support the following functions in constant time:
 
 \begin{itemize}
  \item Check if an address is valid.
@@ -272,7 +272,8 @@ The main difference in our shell compared to a usual Linux shell is that it uses
 %it is remote shell which uses the host system as an source of input and target for output streams. 
 % Communication with the host computer system goes through serial port interface (also knows as RS-232) for which incoming stream of characters is treated as a standard input stream and outgoing set of characters is treated as a standard output stream in terms of C language. 
 % Host computer system is such design plays o role of conventional terminal by connecting the input stream stream of characters from the serial port with display and pushing the characters inputted from keyboard to the same serial port.
-The Picocom \todoref utility is used at the other end of the serial connection to display and send characters.
+The Picocom \cite{web:picocom}
+ utility is used at the other end of the serial connection to display and send characters.
 
 Communication through the serial port is implemented in an independent server, located at \filepath{usr/serial\_driver/}.
 The shell interacts with this driver using the RPC calls \lstinline!aos_rpc_serial_getchar! and \lstinline!aos_rpc_serial_putchar! and some support functions from the standard C library.
@@ -308,7 +309,7 @@ Each iteration of the loop handles one input request and consist of several step
 \end{enumerate} 
 
 The purpose of the first step is to split the endless input stream from the serial port into separate strings, where each one represent single request.
-The ASCII \todoref carriage return character is used as a separator between sequential requests.
+The ASCII carriage return character is used as a separator between sequential requests.
 This split is implemented in function \lstinline!receive_request!, which also echoes every incoming character back to the serial port.
 The echo functionality enables users to see what they type.
 % and by this control correctness of input and reply for the inputted request from the shell running on Pandaboard.
@@ -563,7 +564,7 @@ We also store a pointer to a function needed to read a block from disk.
 That way we can easily reuse the FAT driver module for block devices other than the SD card of the Pandaboard.
 
 A common operation in the FAT filesystem is to follow a chain of clusters and read consecutive sectors.
-We added a small support structure \lstinline!struct sector_stream! to hide this complexity.
+We introduced the \lstinline!struct sector_stream! to hide this complexity.
 A sector stream is an iterator over a file or directory and can be advanced with \lstinline!stream_next!.
 
 An important internal function is \lstinline!find_node!.
@@ -571,7 +572,6 @@ This function takes a path as an argument and tries to find a filesystem node (f
 If found it returns the start cluster and the file size (if it is a file) of the node.
 
 \subsection{File management}
-
 File operations are done in the usual open-read-close cycle and identified by a file descriptor.
 When opening a file we call \lstinline!find_node! to search the filesystem for the file with the given path.
 We then store a mapping from the file descriptor to the start cluster, the file size and the \lstinline!fat32_config!.
@@ -584,13 +584,22 @@ To send the byte buffer back to the client we make use of the bulk transfer mech
 When closing a file we just discard the information collected during the open phase.
 
 \subsection{Partition tables}
-
 Due to the fact that Windows couldn't create an SD card without a partition table we had to add some rudimentary support for it.
 The filesystem server loads the partition table and looks at the first partition table entry.
 It then extracts the start block of the first partition and initializes the FAT driver with that information.
 
-\subsection{Assessment}
-\todo{Write assessment}
+\subsection{ ELF loading}
+
+Currently we don't support ELF loading.
+The functionality is almost implemented, but we could not finish it in time.
+The missing piece is a communication channel from init to the filesystem server, which is needed to get the binary of a channel.
+
+Reusing the normal channel between init and the filesystem server is not possible without some refactoring, because init acts as a server in this channel.
+Using the normal \lstinline!aos_rpc_find_servie! infrastructure isn't possible either, because init doesn't have a channel to itself.
+The solution would have been to do some hack and create a new channel with init as a client and the filesystem as a server.
+
+\todo {Write assessment}
+\todo {Implement ELF loading}
 
 % - filesystem code in aos\_support/fat32.c
 % - handler in mmchs/filesystem\_server.c
@@ -598,11 +607,8 @@ It then extracts the start block of the first partition and initializes the FAT 
 % - some support for partition tables
 % - Performance improvements: sequential read? cached FAT? bulk transfer?
 
-\subsection{ ELF loading}
-
-\todo {Implement ELF loading}
-
-\section{Conclusion}
+% \section{Conclusion}
+\todo{Conclusion?}
 
 \begin{flushleft}
 {{{
