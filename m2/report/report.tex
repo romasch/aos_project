@@ -47,11 +47,11 @@
 
 \section{Introduction}
 
-This report provides documentation for the operating system which we built as part of the project in the Advanced Operating Systems course.
+This report provides documentation for the operating system which we built for the Advanced Operating Systems course project.
 The code is based on a stripped-down version of Barrelfish \cite {web:barrelfish}.
 
 This document is intended to describe the most important concepts and data structures in our code.
-The idea is to give a high-level overview over the individual modules and serve as a complement for the comments within the code.
+The idea is to give a high-level overview that serves as a complement for the comments within the code.
 We will not however provide a detailed description of the API of every function, as this can be either looked up in the header file or generated with Doxygen \cite{web:doxygen}.
 
 Section \ref{sec:getting-started} describes the required steps to compile the project and access basic system services.
@@ -60,7 +60,7 @@ The remaining sections of the report describe the individual project milestones.
 \section{Getting started}
 \label{sec:getting-started}
 
-To be able to boot the operating system you need at least the following modules:
+To be able to boot the operating system you need at least the following modules in the multiboot image:
 \begin{itemize}
  \item Kernel: armv7/sbin/cpu\_omap44xx
  \item Init: armv7/sbin/init
@@ -69,8 +69,8 @@ To be able to boot the operating system you need at least the following modules:
  \item Filesystem: armv7/sbin/mmchs
 \end{itemize}
 
-It might be possible to run the project without a filesystem, but some commands fail.
-We also provide a set of optional applications:
+It might be possible to run the project without a filesystem, but some commands will fail.
+We also ship a set of optional applications:
 \begin{itemize}
  \item Hello World application: armv7/sbin/hello\_world
  \item Memory test: armv7/sbin/memtest
@@ -139,16 +139,16 @@ That way determining if a page fault is ``valid'' is very simple:
 If it's in the range, everything is ok and we can map the page to a frame, and if not we abort due to an invalid address.
 
 The data structure of choice to represent the page table structure is a two-level array that mirrors the actual page tables.
-Currently we only store the capability to the page tables and whether a certain page has been allocated at some point.
+Currently we only store the page table capabilities and whether a certain page has been allocated at some point.
 We don't yet store any flags, pointers to a swap file or other metadata, but it would be easy to add this information.
 
-Frame management is a bit more complex, because we always do allocations of 1 MiB.
+Frame management is a bit more complex because we always do allocations of 1 MB.
 That way we can avoid an IPC call for every single page fault, but we also have to keep track of free and allocated space within a frame.
 The \lstinline!struct frame_list! manages this information for a single frame.
 To support the last use case it also keeps track of the actual pages stored on this frame.
 The \lstinline!paging_state! struct then maintains a double ended queue of \lstinline!frame_list! nodes, where only the frame at the head of the list may contain some free space.
 
-As already mentioned, an important use case we had in mind were requests to return a frame from the memory server.
+As already mentioned, an important use case we had in mind was a request from the memory server to return a frame.
 We never implemented that functionality, but the data structure is designed to support it.
 An implementation would have to do the following:
 \begin{itemize}
@@ -161,7 +161,7 @@ An implementation would have to do the following:
 The data structures used to track frames and page tables need some form of dynamic memory management.
 Unfortunately however we can't use malloc/free in our paging implementation, because this memory is not initially mapped.
 Therefore we used slab allocators (from \filepath{include/barrelfish/slab.h}) to manage the memory needed by these data structures.
-The \lstinline!memory_refill! function in our paging code is used to enlarge the pool of usable memory if the slab allocators run out of space.
+The \lstinline!memory_refill! function in our paging code is used to enlarge the memory pools if the slab allocators run out of space.
 
 \subsection{Assessment}
 
@@ -174,7 +174,7 @@ The initial assumption that only malloc/free can issue unmap operations (and nev
 There are some parts in the code that directly interacts with the paging library and needs to ``free'' a range of virtual memory sometimes, among them the spawndomain library or the bulk transfer mechanism.
 
 Supporting this would have required us to rewrite a lot of existing code, and that's why we didn't do it in the end.
-This in turn means that our current solution leaks virtual addresses, but we tried to reduce this as much as possible by reusing the ranges of virtual memory.
+This in turn means that our current solution leaks virtual addresses, but we tried to reduce this as much as possible by reusing and caching memory.
 
 \section{Local Message Passing}
 
@@ -183,7 +183,7 @@ Some generic server-side features are implemented in \filepath{lib/aos\_support/
 
 The LMP system has some important characteristics:
 \begin{itemize}
- \item All messages are synchronous, i.e. receive is blocking.
+ \item All messages are synchronous and blocking.
  \item The channels are always one-to-one connections.
  \item The communication is client-server style.
  \item We support direct connections to any server (i.e. no indirection through init).
@@ -193,7 +193,8 @@ The LMP system has some important characteristics:
 \end{itemize}
 
 The individual message types and their arguments are described in the header file \filepath{include/barrelfish/aos\_rpc.h}.
-To support writing code on the client side we implemented the feature \lstinline!aos_send_receive! which takes a struct containing all arguments, 
+
+On the client side we implemented the support feature \lstinline!aos_send_receive! which takes a struct containing all arguments, 
 sends a request to the server, waits for a reply, and copies the receive arguments back into the struct.
 That way we could avoid some code duplication for every remote procedure call.
 
@@ -209,12 +210,12 @@ In our LMP implementation we wanted to support direct channels between two domai
 To do that we had to implement some additional functionality, in particular a simple name service and a mechanism to set up a new connection.
 
 The design of the name service is very simple.
-In \filepath{aos\_rpc.h} we added an enum type \lstinline!aos_service! which is used for some of the core system services, such as the serial driver or the FAT file system.
-Each domain that acts as a server for such a core system service then has to register itself via the \lstinline!AOS_RPC_REGISTER_SERVICE! LMP message.
-Init itself keeps track of all registered servers and therefore acts as a name service.
+In \filepath{aos\_rpc.h} we added an enum type \lstinline!aos_service! which defines constants for the core system services, like the serial driver or the FAT file system.
+Each domain that provides such a system service then has to register itself via the \lstinline!AOS_RPC_REGISTER_SERVICE! LMP message.
+Init keeps track of all registered servers and therefore acts as a name service.
 
-When a client wants to find a particular service, it sends a request to init, and init replies with a new endpoint capability of the specified domain.
-This was a bit tricky to implement, because we only allow one-to-one connections, so init first has to request a new endpoint from the (registered) server.
+When a client wants to find a particular service it sends a request to init, and init replies with a new endpoint capability of the specified domain.
+This was a bit tricky to implement because we only allow one-to-one connections, so init first has to request a new endpoint from the (registered) server.
 Init shouldn't mix the reply however with some other request from another domain, therefore we had to break our usual send-reply protocol and plan this interaction carefully.
 
 In a step-by-step fashion this is what happens when a domain wants to find, for example, the serial driver:
@@ -247,18 +248,18 @@ In a step-by-step fashion this is what happens when a domain wants to find, for 
 
 \subsection{Bulk transfer}
 
-For a long time throughout the project we only had the basic message-passing communication model.
-Although this worked well, we always had to split an IPC call into several messages if the data to be transmitted exceeded the capacity of a single message.
+For a long time throughout the project we only had the basic message passing communication model.
+Although this worked well, we always had to split an RPC call into several messages if the data to be transmitted exceeded the capacity of a single message.
 This was a tedious and error prone process, and due to this we decided to add a mechanism for bulk transfer.
 
 The basic idea is to set up a buffer which is shared between client and server.
-This setup is initiated by the client, and only when it is actually needed.
+The setup is initiated by the client, and only when it is actually needed.
 
-We added a new message type which allowed a client to share a frame with a buffer and get back a \lstinline!memory_descriptor!, which it can use afterwards for other IPC calls.
+We added a new message type which allowed a client to share a frame with a buffer and get back a \lstinline!memory_descriptor!, which it can use afterwards for other RPC calls.
 The server-side part is implemented in \filepath{lib/aos\_support/}, which had the nice side effect that every server gained the buffer sharing mechanism for free without any further changes.
 The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, where it is now possible to ``attach'' a shared buffer to any \lstinline!struct aos_rpc! channel.
 
-The bulk transfer mechanism was a pretty late addition to the code base, therefore not all RPC calls have been changed to make use of it yet.
+The bulk transfer mechanism was a pretty late addition to the code base, and therefore not all RPC calls have been changed to make use of it yet.
 
 \section{Shell}
 The shell is the standard tool for communication and interaction between user and operating system.
@@ -308,8 +309,8 @@ Each iteration of the loop handles one input request and consist of several step
 	\item Execution of the request.
 \end{enumerate} 
 
-The purpose of the first step is to split the endless input stream from the serial port into separate strings, where each one represent single request.
-The ASCII carriage return character is used as a separator between sequential requests.
+The purpose of the first step is to split the endless input stream from the serial port into separate strings, where each one represents single request.
+The ASCII carriage return character is used as a separator between two requests.
 This split is implemented in function \lstinline!receive_request!, which also echoes every incoming character back to the serial port.
 The echo functionality enables users to see what they type.
 % and by this control correctness of input and reply for the inputted request from the shell running on Pandaboard.
@@ -343,9 +344,9 @@ The lookup of an internal command is implemented as a simple loop through the in
 		kill 				& integer 							& Force termination of the process with the PID specified as an argument. Init (PID 0) can't be terminated. \\ \hline
 		ledoff			& ---								& Turn off the LED on the Pandaboard.\\ \hline
 		ledon				& --- 							& Turn on the LED on the Pandaboard.\\ \hline
-		ls 				& --- 							& Display list of files and directories in the current directory. \\ \hline
+		ls 				& --- 							& Display a list of files and directories in the current directory. \\ \hline
 		oncore			& integer, string 					& Execute the specified external command on the kernel which the given ID. Can be used to execute programs on the second kernel.\\ \hline
-		ping 				& --- 							& Send a series of `ping' messages to the `test\_domain' process. Expects the latter to be running.\\ \hline
+		ping 				& --- 							& Send a series of ``ping'' messages to the \emph{test\_domain}. Expects the latter to be running.\\ \hline
 		ps 				& --- 							& Display the currently running processes.\\ \hline
 		run\_memtest		& integer 							& Run a memory allocation test. Allocates and fills a memory chunk of the specified size.\\ \hline
 		test\_string		& --- 							& Send a long predefined string to the serial driver display it.\\ \hline            		
@@ -362,11 +363,11 @@ External commands can be executed in two modes: background and foreground.
 By default the shell execute commands in foreground mode, but background mode can be enabled by putting the `\&' character at the end of the request.
 When a command runs in foreground mode the shell suspends itself until the spawned domain terminates.
 The right to receive characters on the serial port is also transferred to the foreground domain.
-A command running in background runs concurrently with the shell and does not get access to the input system.
+A background command runs concurrently with the shell and does not get access to the input system.
     	    	
 \section{Serial I/O}
 The serial driver is a mediator between serial port connection and the rest of the operating system.
-t is located in \filepath{usr/serial\_driver/}.
+It is located in \filepath{usr/serial\_driver/}.
 It has a straightforward implementation due to the simplicity of the serial port management, at least on our level of use.
 The driver doesn't support buffering, interrupts, baud rate control etc. and relies to the preliminary initialization made by the kernel at boot time.
 The driver uses polling to receive characters on the serial port.
@@ -399,7 +400,7 @@ The function does all the steps required to spawn a new domain:
  \item Loading the multiboot module.
  \item Setting up the Dispatcher, CSpace and VSpace.
  \item Parse and relocate the ELF image.
- \item Create the channel between init and the new domain.
+ \item Create an LMP channel between init and the new domain.
  \item Store all relevant data in the \lstinline!domain_info! struct.
  \item Make the domain runnable.
 \end{itemize}
@@ -416,7 +417,7 @@ The first issue we had to solve is to realize \emph{when} a domain needs to be c
 To solve this problem we added a new IPC call \lstinline!AOS_RPC_KILL! which can be used to kill a domain, given a domain ID.
 We then adapted \lstinline!libc_exit! in \filepath{lib/barrelfish/init.c} to perform this call with its own ID (or in other words: the domain commits suicide).
 
-Init therefore gets a notification that some domain wants to be killed.
+Init thus gets a notification that some domain wants to be killed.
 It can then revoke the dispatcher capability to make the domain unrunnable.
 
 The next step would be to properly clean up the domain.
@@ -426,8 +427,8 @@ This in turn means that we're leaking memory for each spawned domain, and it's t
 
 The introduction of \lstinline!AOS_RPC_KILL! allowed us to introduce another mechanism.
 A domain can now issue an \lstinline!AOS_RPC_WAIT_FOR_TERMINATION! to get a notification as soon as another domain stops.
-The shell makes use of this facility to suspend itself during foreground tasks.
-And because we already had the \lstinline!AOS_RPC_KILL! call we could also very easily extend our shell to spawn process in the background and \emph{kill} them later.
+The shell makes use of this facility to suspend itself when spawning foreground tasks.
+And because we already had the \lstinline!AOS_RPC_KILL! call we could also very easily extend our shell to spawn processes in the background and ``kill'' them later.
 
 \subsection{Assessment}
 Our domain management code went through many refactorings, and we're still not quite happy.
@@ -451,8 +452,8 @@ With some more time we may have been able to find a solution, but it's certainly
 \subsection{Preparing the kernel image}
 
 The preparation of the kernel image is mostly done in \filepath{usr/init/cross\_core\_setup.c}.
-The implementation is heavily inspired\footnote{copy-pasted} from the upstream Barrelfish code base.
-Compared to the upstream mechanism we implemented some simplifications however, since we don't have to support more than two cores.
+The implementation is heavily inspired\footnote{i.e. copy-pasted} from the upstream Barrelfish code base.
+Compared to the upstream mechanism we did some simplifications however, since we don't have to support more than two cores.
 We also adapted the code a bit to our own data structures.
 
 \subsection{Low-level mechanisms}
@@ -463,30 +464,30 @@ Within this function there's no magic going on - it just writes the start addres
 
 The real magic happens in \lstinline!arch_init! in \filepath{kernel/arch/omap44xx/init.c} and  \lstinline{arm_kernel_startup} in \filepath{kernel/arch/omap44xx/startup\_arch.c}.
 In \lstinline!arch_init! we set up the \lstinline!global! struct which contains data to be shared between both kernels.
-Among the data shared between the two kernels is the multiboot image.
-We also reserve a region of physical memory as a buffer for future cross core communication and store the physical address and size of it in the \lstinline!global! struct.
+Among the data shared between the two kernels is the address of the multiboot image.
+We also reserve a region of physical memory as a buffer for future cross core communication and store the address and size of it in the \lstinline!global! struct.
 
 In \lstinline!arm_kernel_startup! we do a static split of the available physical memory.
 Each init thus only gets a capability to half of the memory, which prevents them from messing around with each others address space.
-Finally, we also create the capability to the shared frame in this functions and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
+Finally, we also create the capability to the shared frame in this function and store it in the \lstinline!TASKCN_SLOT_MON_URPC! slot.
 
 \subsection{Inter-Kernel Communication}
 	Inter-kernel communication (IKC) is a new type of communication subsystem introduced by the multikernel operating system design.
-	Like inter-process communication links independent and isolated domains running in the same OS node, IKC links independent and isolated nodes in a multi-kernel operating system located on the same machine to a single system.
+	Like local message passing links independent and isolated domains running in the same OS node, IKC links independent and isolated nodes in a multi-kernel operating system located on the same machine to a single system.
 	These nodes are isolated due to the fact that all computer system resources (mainly CPU and memory) are logically split between kernels and each kernel manages and uses its own system resources. 
 	Inter-kernel communication implements a communication channel using shared memory, because this is the fastest to communicate between CPUs on the same machine.
 	
-	In the context of the project a master-slave communication model was chosen for IKC. 
+	We chose to use a master-slave communication model for IKC. 
 	The kernel running on Core 0,
 	%(here and later we will use terms CPU and core interchangeably, because from the point of view of this project and from the point of view of software development in general multiprocessor system doesn't differ from the multicore-processor based system), 
-	which is a bootstrap processor, plays role of the master whereas the kernel on Core 1 is the slave.
+	which is a bootstrap processor, plays the role of the master whereas the kernel on Core 1 is the slave.
 	
 	When spawning the second kernel an IKC communication channel is established between kernels.
 	We're using the reserved shared memory region described in Section \ref{sec:low-level-mechanisms} for that purpose.
 	Communication over this channel is handled by communication drivers which control the data exchange.
 	
 	On both sides \emph{init} plays the role of IKC driver, but the behavior of master and slave differs.
-	Communication can be initiated only by \emph{init} on the master kernel, where the main thread sends messages over channel and waits for a reply like a usual RPC call.
+	Communication can be initiated only by \emph{init} on the master kernel, where the main thread sends messages over channel and waits for a reply like in an usual RPC call.
 	
 	On the slave side communication is handled by a special listener thread within \emph{init} which polls for new messages in the channel.
 	The behaviour is similar to the server side of an RPC call: 
@@ -504,7 +505,7 @@ Finally, we also create the capability to the shared frame in this functions and
     		\label{fig:ikc}
 	\end{figure} 
 		
-	There are three operations supported by channel:
+	There are three operations supported by a channel:
 	\begin{enumerate}
 		\item Push: Put a message into the first free space in the send subchannel. 
 		\item Pop: Receive and remove a message from the receive subchannel.
@@ -526,7 +527,7 @@ Finally, we also create the capability to the shared frame in this functions and
 		\item The message size allows to fit one LMP message into one IKC message.
 		\item The second cache line is not often used for data transfer, so we reserve the last word for a ready sign.
 		This allows us to reduce cache line flip-flopping between writer and reader, because the writer can fill the first cache line of the message without any distortion while the reader constantly checks the last word of second cache line. 
-		When the writer has written whole message into channel, it will raise the ready flag at the end of the second cache line, notifying reader that it can read the message safely now.
+		When the writer has written whole message into the channel, it will raise the ready flag at the end of the second cache line, notifying reader that it can read the message safely now.
 % 		TODO: No - what if message size is bigger than one cache line (32 bytes)?
 % 		As a result only three cache line passes between cores will occur: 2 line from reader to writer, 2 line from writer to reader and finally 1 line from writer to reader.
 	\end{enumerate}
@@ -569,7 +570,7 @@ A sector stream is an iterator over a file or directory and can be advanced with
 
 An important internal function is \lstinline!find_node!.
 This function takes a path as an argument and tries to find a filesystem node (file or directory) with the given path.
-If found it returns the start cluster and the file size (if it is a file) of the node.
+If found it returns the start cluster and the file size of the node.
 
 \subsection{File management}
 File operations are done in the usual open-read-close cycle and identified by a file descriptor.
@@ -592,14 +593,11 @@ It then extracts the start block of the first partition and initializes the FAT 
 
 Currently we don't support ELF loading.
 The functionality is almost implemented, but we could not finish it in time.
-The missing piece is a communication channel from init to the filesystem server, which is needed to get the binary of a channel.
+The missing piece is a communication channel from init to the filesystem server.
 
-Reusing the normal channel between init and the filesystem server is not possible without some refactoring, because init acts as a server in this channel.
+Reusing the normal channel between \emph{init} and the filesystem server is not possible without some refactoring, because \emph{init} acts as a server in this channel.
 Using the normal \lstinline!aos_rpc_find_servie! infrastructure isn't possible either, because init doesn't have a channel to itself.
 The solution would have been to do some hack and create a new channel with init as a client and the filesystem as a server.
-
-\todo {Write assessment}
-\todo {Implement ELF loading}
 
 % - filesystem code in aos\_support/fat32.c
 % - handler in mmchs/filesystem\_server.c
@@ -609,15 +607,14 @@ The solution would have been to do some hack and create a new channel with init 
 
 \section{Conclusion}
 Throughout the project we've implemented central parts of an operating system.
-We first implemented a module to do paging.
-The next step was to implement an IPC mechanism which allowed us to do some simple message passing between processes.
+We first implemented a module to do paging and an IPC mechanism which allowed us to do some simple message passing between processes.
 
 We continued by implementing a shell and a user-space serial driver.
 With the shell in place we added a mechanism to spawn and manage new processes.
 
 We then added the functionality to boot the second core on the Pandaboard and implemented a communication channel between the two \emph{init} domains on each core.
 
-Finally, we also added support to read a FAT file system on an SD card.
+Finally, we also added support to read files and directories in a FAT file system on the SD card.
 
 \begin{flushleft}
 {{{
@@ -627,7 +624,7 @@ Finally, we also added support to read a FAT file system on an SD card.
 \end{flushleft}
 
 
-\todos
+% \todos
 
 \end{document}          
  
