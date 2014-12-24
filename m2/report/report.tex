@@ -259,118 +259,125 @@ The client-side part is implemented in \filepath{lib/barrelfish/aos\_rpc.c}, whe
 The bulk transfer mechanism was a pretty late addition to the code base, therefore not all RPC calls have been changed to make use of it yet.
 
 \section{Shell}
-	Shell is a standard mean of communication and interaction between user and developed operating system.
-	In the same time it is the only user interface currently existing in OS.
-	 
-	Historically shell was grew up in the context of memeater module and in some moment almost completely preempt its original functionality. The source code can be find at path \filepath{usr/memeater/memeater.c}.
-	
-	The main difference of the our shell from the conventional shells is that in fact it is remote shell which uses the host system as an source of input and target for output streams. 
-	Communication with the host computer system goes through serial port interface (also knows as RS-232) for which incoming stream of characters is treated as a standard input stream and outgoing set of characters is treated as a standard output stream in terms of C language. 
-	Host computer system is such design plays o role of conventional terminal by connecting the input stream stream of characters from the serial port with display and pushing the characters inputted from keyboard to the same serial port.
-	Picocom utility is in use for maintaining of this bridge on the host Linux-based host.
-	
-	Communication via serial port is implemented in separate server called serial driver., located at path \filepath{usr/serial\_driver/}.
-	Shell interacts with this driver using functions from the set of standard IO library of C and AOS RPC calls \lstinline!aos_rpc_serial_getchar! and \lstinline!aos_rpc_serial_putchar!.
-	
-	Like most of the servers execution of the server consist of three phases:
-	\begin{enumerate}
-		\item Initialization.
-		\item Service loop.
-		\item Deinitialization.
-	\end{enumerate}
-	During the initialization phase shell sets up its global state and establishes connections with other system components which will be used in the service loop.
-	The set of system components used by shell includes:
-	\begin{enumerate}
-		\item Filesystem driver.
-		\item Led driver.
-		\item Process manager.
-		\item Serial diver.
-	\end{enumerate}
-	Global state of the shell consist of:
-	\begin{enumerate}
-		\item Sign of termination.
-		\item String describing the current directory.
-	\end{enumerate}
-	
-	Service loop of the shell is conditionally endless loop which is run until the sign of termination will not be set. 
-	Each iteration of this loop handles one input request an d consist of several steps:
-	\begin{enumerate}
-		\item Assembling of the request string.
-		\item Splitting of the assembled request into two parts: command and arguments.
-		\item Look up of the executor.
-		\item Execution of the request.
-	\end{enumerate} 
-	Purpose of the first step is to split endless input stream coming from the serial port via serial driver into separate strings each of which represent single request (implemented in function \lstinline!receive_request!).
-	Carriage return character of ASCII encoding table is used as a separator between sequential requests.
-	Function \lstinline!receive_request! also reflects each incoming character back to the serial port.
-	This reflection allows user on the host see what he types on keyboard in real time and by this control correctness of input and reply for the inputted request from the shell running on Pandaboard.
-	Unfortunately, Picocom doesn't support the special handling of the control characters and by default displays all characters disregard to its nature.
-	As a result typo in the inputting command can be fixed only by flushing the current wrong request and retyping it again.
-	Once the complete request is assembled it is passed to the second step of service loop iteration.
-	  
-	To facilitate request processing it splits into two parts -- command and arguments.
-	Command is considered as a first word of request where arguments is a rest of the request.
-	Space characters between command and arguments are omitted.
-	At the current state shell doesn't make splitting of the arguments string into separate argument words.
-	Instead, it is responsibility of each command executor to split and process arguments in appropriate way. 
-	
-	  Shell support two types of commands:
-	  \begin{enumerate}
-	  	\item Internal
-	  	\item External
-	  \end{enumerate}  
-	  Internal commands implementations are embedded into the shell itself. List of internal commands can be found in table \ref{tbl:icl}.
-	  External commands are expected to be implemented as a separate processes and shell expect that appropriate binaries are part of the Barrelfish boot image.
-	  Internal commands have a priority over external commands.
-	  As a result, there is no way to execute external command with the same name as one of the internal commands have.
-	  Internal commands look up implemented as a simple loop through the internal command table until entry with the same name won't be found. 
-	  
-	\begin{table}[h]
-       		\centering
-        	\begin{tabular}{| m{2.0cm} | m{1.5cm} | m{7.0cm} |}
-			\hhline{===}
-            		\textbf{Command name} 	& \textbf{Args} 	& \textbf{Description}	\\
-			\hhline{===}
-            		cat 				& file path 							& Display the content of a file specified as an argument. 																\\ \hline
-            		cd 				& --- \newline file path \newline \newline	& Sets the current directory to root \newline	Set the current directory in accordance with absolute or relative path specified in the argument	.	\\ \hline
-            		echo 				& string 							& Display a string specified as an argument																			\\ \hline
-            		exit 				& --- 							& Force termination of shell																						\\ \hline
-            		kill 				& integer 							& Force termination of the process which PID specified as an argument. Init process (PID 0) can't be terminated.						\\ \hline
-            		ledoff			& ---								& Turn off the led on the Pandaboard.																				\\ \hline
-            		ledon				& --- 							& Turn on the led on the Pandaboard.																				\\ \hline
-            		ls 				& --- 							& Display list of files and directories from the current directory.															\\ \hline
-            		oncore			& integer + string 					& Execute request specified as a string on kernel which id specified as an integer. Can be used to execute programs on slave kernel.			\\ \hline
-            		ping 				& --- 							& Send series of `Ping' messages to the `test\_domain' process. Expects that last one in the running state.							\\ \hline
-            		ps 				& --- 							& Display the currently-running processes.																			\\ \hline
-            		run\_memtest		& integer 							& Run memory allocation test, which allocates and fills memory chunk of specified size. 											\\ \hline
-            		test\_string		& --- 							& Send very long predefined string to the serial driver and by this display it.													\\ \hline            		
-        	\end{tabular}
-        	\caption{List of shell internal commands}
-        	\label{tbl:icl}
-	\end{table}
-	
-	External commands can be executed in two modes: background and foreground.
-	By default shell execute commands on the foreground mode, but execution of the command in the background mode can be forced by putting the `\&' character at the end of request.
-	Command running in the foreground mode suspends the shell until command executor process will be terminated and intercepts control over serial port channel.
-	Command running in background mode runs concurrently with the shell and without access to the serial port channel.
+The shell is the standard tool for communication and interaction between user and operating system.
+It is the only user interface currently existing in our OS.
+  
+Historically the shell was part of the memeater module, which was used to test the paging code.
+It completely lost its original functionality at some point however, and the only thing remaining is the name.
+The source code can be found at \filepath{usr/memeater/memeater.c}.
+
+The main difference in our shell compared to a usual Linux shell is that it uses the serial port interface (also knows as RS-232) for input and output.
+%it is remote shell which uses the host system as an source of input and target for output streams. 
+% Communication with the host computer system goes through serial port interface (also knows as RS-232) for which incoming stream of characters is treated as a standard input stream and outgoing set of characters is treated as a standard output stream in terms of C language. 
+% Host computer system is such design plays o role of conventional terminal by connecting the input stream stream of characters from the serial port with display and pushing the characters inputted from keyboard to the same serial port.
+The Picocom \todoref utility is used at the other end of the serial connection to display and send characters.
+
+Communication through the serial port is implemented in an independent server, located at \filepath{usr/serial\_driver/}.
+The shell interacts with this driver using the RPC calls \lstinline!aos_rpc_serial_getchar! and \lstinline!aos_rpc_serial_putchar! and some support functions from the standard C library.
+
+Like in most servers the exection of the shell consists of three phases:
+\begin{enumerate}
+	\item Initialization.
+	\item Service loop.
+	\item Deinitialization.
+\end{enumerate}
+
+During the initialization phase the shell sets up its global state and establishes connections to other system components which will be used in its main loop.
+The shell uses the following system services:
+\begin{enumerate}
+	\item Filesystem
+	\item LED Driver
+	\item Process Manager
+	\item Serial Driver
+\end{enumerate}
+% Global variables within the shell are:
+% \begin{enumerate}
+% 	\item A boolean sign for termination.
+% 	\item A string describing the current directory.
+% \end{enumerate}
+
+The service loop of the shell is an endless loop which can only be exited when the global flag \lstinline!shell_running! is set to \lstinline!false!
+Each iteration of the loop handles one input request and consist of several steps:
+\begin{enumerate}
+	\item Assembling the request string.
+	\item Splitting the request into two parts: command and arguments.
+	\item Lookup of the handler function.
+	\item Execution of the request.
+\end{enumerate} 
+
+The purpose of the first step is to split the endless input stream from the serial port into separate strings, where each one represent single request.
+The ASCII \todoref carriage return character is used as a separator between sequential requests.
+This split is implemented in function \lstinline!receive_request!, which also echoes every incoming character back to the serial port.
+The echo functionality enables users to see what they type.
+% and by this control correctness of input and reply for the inputted request from the shell running on Pandaboard.
+
+Unfortunately we don't support special treatment of some control characters (like backspace) yet.
+As a result a typo in the input can only be fixed by flushing the current wrong request and retyping it again.
+Once the full request is assembled it is passed to the next step of within the service loop.
+  
+To facilitate request processing we split it into a command and an arguments part.
+The command part is considered as the first word of a request, whereas arguments is the remainder.
+Any space characters between command and arguments are omitted.
+Currently the shell doesn't split the argument string any further.
+It is the responsibility of each command handler to split and process arguments in an appropriate way. 
+
+The shell distinguishes between internal and external commands.
+Internal commands are embedded and executed by the shell itself.
+A list of internal commands can be found in table \ref{tbl:icl}.
+The lookup of an internal command is implemented as a simple loop through the internal command list until an entry with the same name is found. 
+
+\begin{table}[h]
+	\centering
+	\begin{tabular}{| m{2.0cm} | m{1.5cm} | m{7.0cm} |}
+		\hhline{===}
+		\textbf{Command} 	& \textbf{Args} 	& \textbf{Description}	\\
+		\hhline{===}
+		cat 				& file path 							& Display the content of the specified file.\\ \hline
+		cd 				& ---  & Set the current directory to / \\ \hline
+		cd 				& file path &  Set the current directory to the absolute or relative path specified by the argument.	\\ \hline
+		echo 				& string 							& Display the argument string. \\ \hline
+		exit 				& --- 							& Exit the shell. \\ \hline
+		kill 				& integer 							& Force termination of the process with the PID specified as an argument. Init (PID 0) can't be terminated. \\ \hline
+		ledoff			& ---								& Turn off the LED on the Pandaboard.\\ \hline
+		ledon				& --- 							& Turn on the LED on the Pandaboard.\\ \hline
+		ls 				& --- 							& Display list of files and directories in the current directory. \\ \hline
+		oncore			& integer, string 					& Execute the specified external command on the kernel which the given ID. Can be used to execute programs on the second kernel.\\ \hline
+		ping 				& --- 							& Send a series of `ping' messages to the `test\_domain' process. Expects the latter to be running.\\ \hline
+		ps 				& --- 							& Display the currently running processes.\\ \hline
+		run\_memtest		& integer 							& Run a memory allocation test. Allocates and fills a memory chunk of the specified size.\\ \hline
+		test\_string		& --- 							& Send a long predefined string to the serial driver display it.\\ \hline            		
+	\end{tabular}
+	\caption{List of shell internal commands}
+	\label{tbl:icl}
+\end{table}
+
+
+A command that does not match against an internal command is treated as an external command.
+When encountering an external command the shell tries to find and spawn a process with the same name in the boot image.
+
+External commands can be executed in two modes: background and foreground.
+By default the shell execute commands in foreground mode, but background mode can be enabled by putting the `\&' character at the end of the request.
+When a command runs in foreground mode the shell suspends itself until the spawned domain terminates.
+The right to receive characters on the serial port is also transferred to the foreground domain.
+A command running in background runs concurrently with the shell and does not get access to the input system.
     	    	
-	 \section{Serial I/O}
-	 	The serial driver is a mediator between serial port connection and the rest of the rest of operating system. It is located in \filepath{usr/serial\_driver/}.
-	 	It have straightforward implementation due to the simplicity of the serial port management at least on the level of use which we have.
-	 	Driver didn't support buffering, interrupts, baud rate control etc. and relies to the preliminary port serial port initialization made by kernel during boot up.
-	 	
-	 	Handling of the serial port is is based on polling.
-		
-		Driver provides the next set of services:
-		\begin{enumerate}
-			\item Put char. Output character into serial port.
-			\item Get char. Input character from the serial port.
-			\item Put string. Output a string of characters to the serial port. This makes use of the bulk transfer mechanism to avoid splitting and transmitting the string in small chunks.
-			\item Set foreground. Set the process id of the process which will be the only process eligible to receive input from the serial port.
-		\end{enumerate}
-		
-		In addition for convenience the libc was customized to use serial port driver as back end for the prinf and scanf families of functions.
-		As a result any application is able to use traditional C-like IO.
+\section{Serial I/O}
+The serial driver is a mediator between serial port connection and the rest of the operating system.
+t is located in \filepath{usr/serial\_driver/}.
+It has a straightforward implementation due to the simplicity of the serial port management, at least on our level of use.
+The driver doesn't support buffering, interrupts, baud rate control etc. and relies to the preliminary initialization made by the kernel at boot time.
+The driver uses polling to receive characters on the serial port.
+
+The driver serves as a target for the following RPC calls and services:
+\begin{enumerate}
+	\item Send a character over serial port.
+	\item Receive a character from the serial port.
+	\item Send a string over the serial port. This makes use of the bulk transfer mechanism to avoid splitting and transmitting the string in small chunks.
+	\item Set a domain as foreground domain. The specified domain will then be the only one with the right to receive input from the serial port.
+\end{enumerate}
+
+In addition libc was adapted to use the serial port driver as a backend for \lstinline!printf!, \lstinline!scanf! and related functions.
+As a result any application is able to use traditional C-like IO with our serial driver.
 
 \section{Process management}
 \label{sec:process-management}
