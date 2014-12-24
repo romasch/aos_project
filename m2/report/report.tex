@@ -607,8 +607,17 @@ The solution would have been to do some hack and create a new channel with init 
 % - some support for partition tables
 % - Performance improvements: sequential read? cached FAT? bulk transfer?
 
-% \section{Conclusion}
-\todo{Conclusion?}
+\section{Conclusion}
+Throughout the project we've implemented central parts of an operating system.
+We first implemented a module to do paging.
+The next step was to implement an IPC mechanism which allowed us to do some simple message passing between processes.
+
+We continued by implementing a shell and a user-space serial driver.
+With the shell in place we added a mechanism to spawn and manage new processes.
+
+We then added the functionality to boot the second core on the Pandaboard and implemented a communication channel between the two \emph{init} domains on each core.
+
+Finally, we also added support to read a FAT file system on an SD card.
 
 \begin{flushleft}
 {{{
